@@ -8,7 +8,7 @@ A desktop player for watching **180° / 360° VR video on an ordinary flat
 monitor**, comfortably, including local 8K. Optionally it tracks your head with
 a plain webcam and turns the view for you.
 
-Version 0.2. Windows only. Known in Chinese as **VR 视频平面播放器**.
+Version 0.2. Windows only.
 
 Decoding and rendering are mpv + mpv360; this repository is the player window
 and the tracking bridge between them.
