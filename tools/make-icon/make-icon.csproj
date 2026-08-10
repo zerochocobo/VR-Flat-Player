@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Draws assets/icon.svg with GDI+ and writes assets/icon.ico plus PNGs.
+
+    There is no SVG rasteriser on a stock Windows box and I did not want the
+    icon pipeline to need one, so the shapes are duplicated here in code. The
+    SVG stays the master for anything that renders SVG (README, web, stores);
+    this file exists only because .ico is a raster format. Keep the two in
+    step: the geometry constants below are the same 256-unit grid.
+
+    UseWindowsForms is what pulls in System.Drawing.Common from the installed
+    desktop runtime, which avoids a NuGet dependency for a build-time tool.
+
+      Run it with: dotnet run, project tools/make-icon. There is a wrapper at
+      tools/make-icon.bat.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>make-icon</AssemblyName>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,50 @@
+# ---------------------------------------------------------------- build ---
+bin/
+obj/
+*.user
+dist/
+*.zip
+
+# ------------------------------------------------------- fetched, not ours ---
+# Everything below is downloaded by tools/install-*.bat. None of it is our work
+# and none of it belongs in this history.
+#
+# Deliberately narrow under mpv/: mpv.conf, input.conf, scripts/vrmenu.lua and
+# shaders-src/ are OURS and tracked. Only the vendored and generated copies are
+# ignored.
+mpv/mpv.exe
+mpv/*.dll
+mpv/scripts/mpv360.lua
+mpv/scripts/uosc/
+mpv/fonts/
+mpv/shaders/
+mpv/mpv360.LICENSE
+third_party/
+
+# ONNX models, ~14 MB, fetched by tools/install-models.bat. Published elsewhere
+# under their own licences; see the README for the sources.
+models/
+*.onnx
+
+# --------------------------------------------------------- runtime state ---
+# Written by the player as it runs. It describes the machine that ran it last,
+# which during development is always the developer's — and a release carrying
+# it once shipped a window size from a 288 dpi display. See AGENTS.md.
+bridge.config.json
+window-state.json
+mode-memory.json
+mpv-last-run.log
+mpv-last-run-*.log
+mpv/watch_later/
+recordings/
+
+# ------------------------------------------------------------- generated ---
+# assets/icon.svg is the master and assets/icon.ico is needed by the build;
+# the rest is output of tools/make-icon and can be regenerated.
+assets/icon-1024.png
+assets/icon-512.png
+assets/icon-sizes.png
+
+# prompt/ is tracked on purpose: HANDOVER_*.md is the development record handed
+# forward between sessions. It is long and Chinese and not a project README,
+# which is why it is not README.md any more.

@@ -1,0 +1,64 @@
+<!--
+  VR Flat Player — application / promotional icon.
+
+  Three shapes, each carrying one of the three things the product does:
+
+    * the visor silhouette, with its nose bridge   -> VR content
+    * the play triangle inside it                  -> it is a video player
+    * the two arcs either side                     -> the camera watching you
+
+  The arcs are the only part that has to work twice: read as part of the
+  headset they are the strap, which is what stops the visor looking like a
+  television; read on their own they are a sensing field, which is the face
+  tracking and the gesture control. One shape, two meanings, no extra clutter.
+
+  Everything has to survive 16x16, so there are three shapes and no more, the
+  visor is a plain silhouette rather than an outline, and the play triangle is
+  solid rather than knocked out. The .ico goes further and drops the arcs below
+  32px, where they are thinner than a pixel; see tools/make-icon, which is the
+  raster twin of this file and must be kept on the same 256-unit grid.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#312E81"/>
+      <stop offset="0.55" stop-color="#5B21B6"/>
+      <stop offset="1" stop-color="#7C3AED"/>
+    </linearGradient>
+
+    <radialGradient id="glow" cx="0.28" cy="0.2" r="0.85">
+      <stop offset="0" stop-color="#A78BFA" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#A78BFA" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="256" height="256" rx="56" fill="url(#tile)"/>
+  <rect width="256" height="256" rx="56" fill="url(#glow)"/>
+
+  <!-- Tracking field / head strap: 70 degrees of arc at 3 and 9 o'clock. -->
+  <g fill="none" stroke="#22D3EE" stroke-width="15" stroke-linecap="round">
+    <path d="M214.01 67.77 A105 105 0 0 1 214.01 188.23"/>
+    <path d="M41.99 188.23 A105 105 0 0 1 41.99 67.77"/>
+  </g>
+
+  <!--
+    The visor: a rounded rectangle whose bottom edge lifts into a nose bridge.
+    The notch is part of the outline, not a subtracted shape, so that it stays
+    one path and antialiases cleanly at every size.
+  -->
+  <path fill="#FFFFFF" d="M80 76
+    H176 A36 36 0 0 1 212 112
+    V144 A36 36 0 0 1 176 180
+    H152 C140 180 134 154 128 154
+         C122 154 116 180 104 180
+    H80  A36 36 0 0 1 44 144
+    V112 A36 36 0 0 1 80 76 Z"/>
+
+  <!--
+    Play triangle. Authored undersized: the same-colour round-join stroke
+    inflates it by half the pen width on every edge, which is how the corners
+    get their radius without hand-built arcs.
+  -->
+  <path d="M106 98 L168 124 L106 150 Z"
+        fill="#3B0F82" stroke="#3B0F82" stroke-width="12" stroke-linejoin="round"/>
+</svg>
