@@ -26,6 +26,9 @@ public sealed class ViewMapper
     private bool _haveCentre;
     private double _lastPoseTime = double.NaN;
 
+    /// <summary>Smoothed interval between arriving poses. 0 until two have landed.</summary>
+    private double _poseGap;
+
     // Head-derived part of the view, kept separately from the manual part so a
     // mouse drag and head tracking can coexist instead of overwriting each other.
     private ViewAngles _head;
@@ -148,6 +151,29 @@ public sealed class ViewMapper
     public void Accept(in HeadPose pose)
     {
         var t = pose.TimeSeconds;
+
+        // How far apart poses are actually arriving, which is what the glide
+        // has to cover. Measured here rather than assumed, because it is a
+        // property of the machine and the model, not of the configuration.
+        //
+        // The cut-off between "a slow rate" and "a dropout" is two seconds, and
+        // it was half a second first — which silently broke the whole thing for
+        // the machines it was written for. A tracker managing 1.5 poses a
+        // second has a 667 ms gap, so every sample was thrown out as a dropout,
+        // the estimate stayed at zero, and neither the glide nor the timeout
+        // ever adapted. It measured nothing precisely where it was needed.
+        //
+        // Nothing downstream trusts this number on its own: the glide clamps it
+        // to GlideMaxSeconds and the timeout takes the larger of it and the
+        // configured floor, so a stray long gap cannot do much even when one
+        // does get through.
+        if (!double.IsNaN(_lastPoseTime))
+        {
+            var gap = t - _lastPoseTime;
+            if (gap > 0 && gap < 2.0)
+                _poseGap = _poseGap <= 0 ? gap : _poseGap + (gap - _poseGap) * 0.2;
+        }
+
         _lastPoseTime = t;
         HasSignal = true;
 
@@ -225,6 +251,14 @@ public sealed class ViewMapper
         var tau = _cfg.Filter.GlideSeconds;
         if (tau <= 0 || dtSeconds <= 0) return;
 
+        // Stretch the glide to the measured pose gap, never shrink it below the
+        // configured floor. On a tracker that keeps up the gap is smaller than
+        // the floor and this changes nothing; on one that does not, it is the
+        // difference between moving smoothly and arriving in steps. See
+        // FilterConfig.GlideMaxSeconds for the measurements.
+        if (_poseGap > 0 && _cfg.Filter.GlideMaxSeconds > tau)
+            tau = Math.Clamp(_poseGap, tau, _cfg.Filter.GlideMaxSeconds);
+
         var a = 1 - Math.Exp(-dtSeconds / tau);
         _head = new ViewAngles(
             _head.YawDegrees + (_headTarget.YawDegrees - _head.YawDegrees) * a,
@@ -299,7 +333,18 @@ public sealed class ViewMapper
     public bool CheckStale(double nowSeconds)
     {
         if (!HasSignal || double.IsNaN(_lastPoseTime)) return false;
-        if (nowSeconds - _lastPoseTime <= _cfg.TrackingTimeoutSeconds) return false;
+
+        // Three missed poses, or the configured floor, whichever is longer.
+        //
+        // The floor alone is a fixed number against a rate that varies by an
+        // order of magnitude between machines. At 30 poses a second 0.5 s is
+        // fifteen of them and clearly a dropout; at three it is one and a half,
+        // so an ordinary pair of slow frames looked like the tracker dying. The
+        // view froze, the status line said LOST, a pose arrived, it all resumed
+        // — over and over, in a log where the camera never actually failed.
+        var timeout = Math.Max(_cfg.TrackingTimeoutSeconds,
+                               _poseGap * _cfg.TrackingTimeoutPoseGaps);
+        if (nowSeconds - _lastPoseTime <= timeout) return false;
         HasSignal = false;
         return true;   // view intentionally keeps its last value
     }

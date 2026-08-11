@@ -90,6 +90,23 @@ internal static class Program
         SessionLog.Open(AppPaths.MpvLogFile);
         Console.SetOut(SessionLog.Tee(Console.Out));
 
+        // A crash must leave a note. The player has been reported to "close by
+        // itself after a while", and the log simply stopped — which tells us
+        // nothing at all about why. An exception on a background thread takes
+        // the process down without touching stdout, so the last thing in the
+        // file is whatever happened to be written before it.
+        //
+        // This cannot catch everything: an access violation inside native code
+        // bypasses the CLR entirely. But if it is managed, the next report will
+        // carry the stack instead of a silence.
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+        {
+            SessionLog.Line($"\n=== unhandled exception, terminating={e.IsTerminating} ===\n{e.ExceptionObject}");
+            SessionLog.Close();
+        };
+        Application.ThreadException += (_, e) =>
+            SessionLog.Line($"\n=== exception on the UI thread ===\n{e.Exception}");
+
         Console.WriteLine($"{AppInfo.NameAndVersion}");
         Console.WriteLine($"log             : {SessionLog.Path ?? "(none — could not open a file)"}");
         AppPaths.SeedUserConfig();
@@ -102,6 +119,21 @@ internal static class Program
         UiStrings.Init(Localization.ResolveOwnLanguage(cfg.Ui.Language));
 
         Console.WriteLine($"install         : {AppPaths.InstallRoot}");
+
+        // Here, before mpv exists, and not when head tracking is switched on.
+        //
+        // Windows keys a loaded module by base name: once any onnxruntime.dll is
+        // in the process, LoadLibrary("onnxruntime") returns that one and never
+        // looks at a path again. Playing a 4K file pulls in a crowd of media and
+        // D3D11 components, and on one machine something in that crowd brought
+        // in the System32 copy — eleven releases behind what we build against,
+        // which then killed the process on the first ORT call.
+        //
+        // That is exactly why "open the camera first, then the video" worked and
+        // the other order did not. Loading ours during startup makes the working
+        // order the only order.
+        HeadTrackBridge.Tracking.Face.OnnxLoader.Install();
+        Console.WriteLine($"onnxruntime     : {HeadTrackBridge.Tracking.Face.OnnxLoader.Describe()}");
         if (AppPaths.IsRedirected)
             Console.WriteLine($"settings        : {AppPaths.DataRoot}   (install directory is read-only)");
 

@@ -8,7 +8,11 @@
 플레이어입니다. 로컬 8K도 재생합니다. 일반 웹캠으로 머리 움직임을 추적해 시야를
 자동으로 돌릴 수도 있습니다.
 
-버전 0.2, Windows 전용.
+버전 0.3, Windows 전용.
+
+![VR Flat Player](assets/screen/screen_ko.png)
+
+*Tab으로 여는 모드 패널과 아래쪽 uosc 컨트롤 바.*
 
 디코딩과 렌더링은 mpv + mpv360이 맡고, 이 저장소는 플레이어 창과 둘 사이의 추적
 브리지입니다.
@@ -118,7 +122,11 @@ mpv는 별개의 GPL 프로그램이며, 링크하는 것이 아니라 **별도 
 | `Ctrl+E` | 360 모드 켜기/끄기 |
 | `Ctrl+Shift+P` | 투영 방식 순환 |
 | `Ctrl+Shift+E` | 좌우 눈 교체 |
-| `Ctrl+Shift+↑ / ↓` | 시야각 |
+| `Ctrl+Shift+↑ / ↓` | 시야각, 한 번에 5° |
+| `Ctrl+0` / 휠 클릭 | 시야각을 80°로 복원 |
+| `0` / `9` / Shift+휠 | 음량 높이기 / 낮추기 |
+| `3` / `4` | 어둡게 / 밝게 |
+| `1` / `2` | 대비 낮추기 / 높이기 |
 | `Ctrl+Shift+V` | 머리 기준은 두고 시야만 초기화 |
 | `Ctrl+Shift+H` | 머리 추적 켜기/끄기 |
 | `Ctrl+[` / `Ctrl+]` | 추적 게인 − / + |
@@ -141,7 +149,10 @@ mpv 본래의 키(스페이스, 방향키, 음량)도 그대로 동작합니다.
 | `yaw.stickyDegrees` | 1.0 | 이 범위 안의 머리 움직임에는 화면이 전혀 움직이지 않음 |
 | `pitch.inputRangeDegrees` | 12 | 사람은 좌우로 돌리는 만큼 위아래로 끄덕이지 않음 |
 | `video.fallback` | `vr180` | 단서 없는 2:1 파일을 무엇으로 열지 |
-| `source.camera.landmarkFps` | 30 | 모델이 디코더의 CPU를 뺏으면 낮추기 |
+| `filter.glideMaxSeconds` | 0.30 | 포즈 간격이 넓을 때 글라이드를 늘릴 수 있는 상한. 느린 기기에서 부드럽게 움직이는지 계단처럼 끊기는지가 여기서 갈린다. `glideSeconds`와 같은 값으로 두면 고정 글라이드로 돌아간다 |
+| `source.camera.landmarkFps` | 30 | 랜드마커의 초당 실행 횟수 상한 |
+| `source.camera.detectWidth` | 640 | 얼굴 검출기가 보는 가로 크기. 0이면 전체 프레임. 1280보다 5배 싸고 박스는 그대로 쓸 만하다 |
+| `source.camera.trackingCpuShare` | 0.75 | 추적 파이프라인 전체가 쓸 수 있는 시간 비율. 낮추면 CPU는 줄지만 머리 움직임에 화면이 따라오는 지연이 같은 배율로 늘어난다 |
 
 창 위치, 파일별 VR 모드, 실행 로그는 각각 `window-state.json`,
 `mode-memory.json`, `mpv-last-run.log`에 나뉘어 있습니다. **나눈 것은 의도적**이며,
@@ -166,7 +177,7 @@ src/HeadTrackBridge/     플레이어 본체: 창, 메뉴, IPC, 추적, 매핑
   Tracking/              카메라, 랜드마크, 자세 추정
   Mapping/               필터, 게인 곡선, 시야 합성
 mpv/                     자체 mpv 설정, 스크립트, 셰이더 소스
-tests/VideoFormatTests/  608개 단언, 몇 초면 완료
+tests/VideoFormatTests/  628개 단언, 몇 초면 완료
 tools/                   설치 스크립트, 아이콘 생성, 패키징
 prompt/                  개발 인수인계 기록(중국어)
 ```

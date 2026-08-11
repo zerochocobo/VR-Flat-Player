@@ -95,11 +95,29 @@ public sealed class PlayerModeController
     /// is 5% — and 70 starts to feel like a keyhole. Both are defensible; wider
     /// than 90 is not.
     /// </summary>
-    public double FovDegrees { get; private set; } = 80;
+    public double FovDegrees { get; private set; } = DefaultFovDegrees;
+
+    /// <summary>
+    /// The starting field of view, and what "reset" returns to.
+    ///
+    /// Named because it had been written out twice: the menu's reset put the
+    /// picture back to a hardcoded 120 long after the default became 80, so the
+    /// one control whose whole job is "put it back" moved it somewhere the
+    /// player never starts.
+    /// </summary>
+    public const double DefaultFovDegrees = 80;
 
     public async Task SetFovAsync(double degrees, ModeOrigin origin = ModeOrigin.User)
     {
-        FovDegrees = Math.Clamp(degrees, 40, 160);
+        // Down to 10 degrees, not 40. Narrowing the field of view is how you
+        // lean in on something far away in the frame, and 40 stopped that well
+        // before it stopped being useful — the log of a real session shows the
+        // value pinned at 40 with the user still asking for less.
+        //
+        // The ceiling stays at 160. Past that a rectilinear render stretches
+        // the edges beyond any use (at 160 an object at the edge is already
+        // eleven times too wide), and 180 is a mathematical singularity.
+        FovDegrees = Math.Clamp(degrees, 10, 160);
         await _driver.SetFovAsync(FovDegrees).ConfigureAwait(false);
         await BroadcastAsync().ConfigureAwait(false);
         Changed?.Invoke(Describe(), origin);

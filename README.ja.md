@@ -8,7 +8,11 @@
 プレイヤーです。ローカルの 8K にも対応します。市販のウェブカメラで頭の動きを追い、
 視点を自動で動かすこともできます。
 
-バージョン 0.2、Windows 専用。
+バージョン 0.3、Windows 専用。
+
+![VR Flat Player](assets/screen/screen_ja.png)
+
+*Tab で開くモードパネルと、下部の uosc コントロールバー。*
 
 デコードと描画は mpv + mpv360 が担当し、このリポジトリはプレイヤーのウィンドウと、
 両者をつなぐトラッキングブリッジです。
@@ -119,7 +123,11 @@ mpv は独立した GPL のプログラムで、リンクするのではなく**
 | `Ctrl+E` | 360 モードの切り替え |
 | `Ctrl+Shift+P` | 投影方式の巡回 |
 | `Ctrl+Shift+E` | 左右の目を入れ替え |
-| `Ctrl+Shift+↑ / ↓` | 視野角 |
+| `Ctrl+Shift+↑ / ↓` | 視野角、1 回 5° |
+| `Ctrl+0` / ホイール押し込み | 視野角を 80° に戻す |
+| `0` / `9` / Shift+ホイール | 音量を上げる / 下げる |
+| `3` / `4` | 暗く / 明るく |
+| `1` / `2` | コントラストを下げる / 上げる |
 | `Ctrl+Shift+V` | 頭の基準を変えずに視点だけリセット |
 | `Ctrl+Shift+H` | 頭部トラッキングの切り替え |
 | `Ctrl+[` / `Ctrl+]` | トラッキングのゲイン − / + |
@@ -142,7 +150,10 @@ mpv 本来のキー(スペース、方向キー、音量)もそのまま使え�
 | `yaw.stickyDegrees` | 1.0 | これ以内の頭の動きでは画面が全く動かない |
 | `pitch.inputRangeDegrees` | 12 | 人は首を横に振るほど上下には振らない |
 | `video.fallback` | `vr180` | 手がかりのない 2:1 ファイルの既定 |
-| `source.camera.landmarkFps` | 30 | モデルがデコーダーの CPU を奪うなら下げる |
+| `filter.glideMaxSeconds` | 0.30 | ポーズの間隔が広いときにグライドを伸ばせる上限。遅いマシンで滑らかに動くか階段状になるかはこれで決まる。`glideSeconds` と同じ値にすれば固定グライドに戻る |
+| `source.camera.landmarkFps` | 30 | ランドマーカーの毎秒実行回数の上限 |
+| `source.camera.detectWidth` | 640 | 顔検出器に渡す横幅。0 でフレーム全体。1280 の 5 分の 1 のコストで、枠の使い勝手は変わらない |
+| `source.camera.trackingCpuShare` | 0.75 | トラッキング全体が使ってよい時間の割合。下げれば CPU は減るが、頭の動きに映像が追従するまでの遅れが同じ倍率で増える |
 
 ウィンドウの位置、ファイルごとの VR モード、実行ログはそれぞれ
 `window-state.json`、`mode-memory.json`、`mpv-last-run.log` に分けてあります。
@@ -168,7 +179,7 @@ src/HeadTrackBridge/     プレイヤー本体: ウィンドウ、メニュー�
   Tracking/              カメラ、ランドマーク、姿勢推定
   Mapping/               フィルタ、ゲイン曲線、視点合成
 mpv/                     自前の mpv 設定、スクリプト、シェーダーのソース
-tests/VideoFormatTests/  608 個のアサーション、数秒で完走
+tests/VideoFormatTests/  628 個のアサーション、数秒で完走
 tools/                   インストールスクリプト、アイコン生成、パッケージング
 prompt/                  開発の引き継ぎ記録(中国語)
 ```

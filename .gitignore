@@ -35,6 +35,7 @@ window-state.json
 mode-memory.json
 mpv-last-run.log
 mpv-last-run-*.log
+landmarker-loading.flag
 mpv/watch_later/
 recordings/
 

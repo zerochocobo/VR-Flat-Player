@@ -29,6 +29,13 @@ public static class AppPaths
     public static string WindowStateFile => Path.Combine(DataRoot, "window-state.json");
     public static string MpvLogFile => Path.Combine(DataRoot, "mpv-last-run.log");
 
+    /// <summary>
+    /// Exists only while the ONNX landmarker is being created. See
+    /// <c>Tracking.Face.LandmarkerGuard</c> — the presence of this file on
+    /// startup means the last attempt killed the process.
+    /// </summary>
+    public static string LandmarkerGuardFile => Path.Combine(DataRoot, "landmarker-loading.flag");
+
     /// <summary>Resolve a possibly-relative path from the config against the data directory.</summary>
     public static string Resolve(string path) =>
         Path.IsPathRooted(path) ? path : Path.Combine(DataRoot, path);

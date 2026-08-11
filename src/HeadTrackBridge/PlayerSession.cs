@@ -45,6 +45,17 @@ public sealed class PlayerSession : IDisposable
     public ViewMapper Mapper { get; }
     public BridgeConfig Config => _cfg;
 
+    /// <summary>
+    /// A click on the video that was not a drag. Raised on the watcher's thread.
+    ///
+    /// The window decides what it means, and today it means one thing: with no
+    /// file open, the black rectangle is the most obvious place to click and it
+    /// did nothing at all. It stays silent during playback — a click there is
+    /// how you stop a drag, and pausing on it is a different feature with
+    /// different opinions attached.
+    /// </summary>
+    public event Action? VideoClicked;
+
     /// <summary>Null until <see cref="StartAsync"/> has connected.</summary>
     public MpvIpcClient? Ipc { get; private set; }
 
@@ -485,6 +496,10 @@ public sealed class PlayerSession : IDisposable
             // in a rectilinear projection with square pixels.
             Mapper.ApplyManualDelta(dx * mode.FovDegrees, dy * mode.FovDegrees);
         watcher.DragEnd += () => Mapper.EndManualOverride();
+        // Not logged here. A click on the video is ordinary during playback —
+        // it is how a drag ends — so a line at this level would print on almost
+        // every interaction. Whoever acts on it logs that instead.
+        watcher.Click += () => VideoClicked?.Invoke();
 
         if (_cfg.Input.DragToLook) watcher.Start(ct);
     }
@@ -520,10 +535,30 @@ public sealed class PlayerSession : IDisposable
                              double.TryParse(a[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var lpitch):
                 Mapper.ApplyManualDelta(-lyaw, lpitch);
                 break;
+            // SetTrackingEnabled, not the TrackingEnabled property.
+            //
+            // The property only flips the config flag, saves it, ticks the menu
+            // and broadcasts the on-screen icon. It never opens the camera —
+            // that lives in the method. So Ctrl+Shift+H turned the face icon
+            // green while the camera stayed dark and nothing was tracked, and
+            // the state then disagreed with reality: the next menu click was
+            // spent switching a camera off that had never been on, so it took
+            // two clicks to get a picture. Reported as "I have to toggle it
+            // several times before the light comes on", and that is exactly
+            // what it was.
+            //
+            // Three entry points, one of them complete. The other two are here
+            // and in the console key below.
             case "toggle":
-                TrackingEnabled = !TrackingEnabled;
-                _ = ipc.ShowTextAsync(UiStrings.Current[TrackingEnabled ? "osd.trackingOn" : "osd.trackingOff"]);
+            {
+                var want = !TrackingEnabled;
+                var ok = SetTrackingEnabled(want);
+                _ = ipc.ShowTextAsync(
+                    !ok ? UiStrings.Current["cam.startFailedBody"]
+                        : UiStrings.Current[want ? "osd.trackingOn" : "osd.trackingOff"],
+                    ok ? 1200 : 3000);
                 break;
+            }
             // ---- player mode, driven by the OSD menu -----------------------
             case "set-geometry" when a.Length > 2 && PlayerModeController.ParseGeometry(a[2]) is { } g:
                 _ = mode.SetGeometryAsync(g);
@@ -823,6 +858,12 @@ public sealed class PlayerSession : IDisposable
         w.Save(AppPaths.WindowStateFile);
     }
 
+    /// <summary>
+    /// Writes the settings file now. For the window, which changes settings the
+    /// session does not otherwise hear about — the UI language is the first.
+    /// </summary>
+    public void SaveSettings() => SaveConfig();
+
     private void SaveConfig()
     {
         try { _cfg.Save(_configPath); }
@@ -841,7 +882,14 @@ public sealed class PlayerSession : IDisposable
 
         var lastStatus = 0.0;
         var lastTick = 0.0;
-        var wasStale = false;
+
+        // Toast state, deliberately separate from the mapper's own stale flag.
+        // See the announcement block below for why the two must not be the same
+        // thing.
+        var toldStale = false;
+        var pendingStale = false;
+        var pendingSince = 0.0;
+        var sawPose = false;
 
         using var outputTimer = new PeriodicTimer(TimeSpan.FromSeconds(1.0 / Math.Max(1, _cfg.OutputRateHz)));
         while (!ct.IsCancellationRequested)
@@ -861,15 +909,46 @@ public sealed class PlayerSession : IDisposable
             lastTick = now;
             Mapper.Advance(dt);
 
-            if (Mapper.CheckStale(now) && !wasStale)
+            Mapper.CheckStale(now);
+
+            // Announce a change only once it has held. The mapper freezes the
+            // view after half a second without a pose, which is right — the
+            // view must not drift on stale data — but half a second is far
+            // shorter than the gap between poses when the tracker is running on
+            // its CPU budget and the face is only intermittently found. Wired
+            // straight to the toast, that produced an endless "signal lost /
+            // signal back" flicker over the video while tracking was in fact
+            // working as designed.
+            //
+            // With the hold, a flapping signal says nothing at all and a face
+            // that really leaves says it once.
+            const double announceAfterSeconds = 2.0;
+
+            var tracking = _source is not null && TrackingEnabled;
+            if (!tracking)
             {
-                wasStale = true;
-                await Ipc.ShowTextAsync(UiStrings.Current["osd.trackingLost"], 2000);
+                // Switching tracking off is not signal loss, and must not toast.
+                sawPose = toldStale = pendingStale = false;
             }
-            else if (Mapper.HasSignal && wasStale)
+            else
             {
-                wasStale = false;
-                await Ipc.ShowTextAsync(UiStrings.Current["osd.trackingBack"]);
+                if (Mapper.HasSignal) sawPose = true;
+
+                // Nothing to lose before the first pose ever arrives: the camera
+                // takes a moment to open, and that silence is not a fault.
+                var stale = sawPose && !Mapper.HasSignal;
+                if (stale != pendingStale)
+                {
+                    pendingStale = stale;
+                    pendingSince = now;
+                }
+                else if (stale != toldStale && now - pendingSince >= announceAfterSeconds)
+                {
+                    toldStale = stale;
+                    await Ipc.ShowTextAsync(
+                        UiStrings.Current[stale ? "osd.trackingLost" : "osd.trackingBack"],
+                        stale ? 2000 : 1200);
+                }
             }
 
             // Unconditional. This pushes whatever the mapper currently holds,
@@ -1107,7 +1186,13 @@ public sealed class PlayerSession : IDisposable
                 {
                     case 'r': Mapper.RequestRecenter(); Report("recentred"); break;
                     case 'v': Mapper.ResetView(); Report("view reset"); break;
-                    case 't': TrackingEnabled = !TrackingEnabled; Report($"tracking {(TrackingEnabled ? "on" : "off")}"); break;
+                    // Through the method, for the same reason as the hotkey
+                    // above: the property does not open the camera.
+                    case 't':
+                        Report(SetTrackingEnabled(!TrackingEnabled)
+                            ? $"tracking {(TrackingEnabled ? "on" : "off")}"
+                            : "tracking: the camera would not open");
+                        break;
                     case 'f':
                         _cfg.Filter.Enabled = !_cfg.Filter.Enabled;
                         Report($"filter {(_cfg.Filter.Enabled ? "on" : "off")}");

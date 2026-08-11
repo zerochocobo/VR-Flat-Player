@@ -8,7 +8,11 @@ A desktop player for watching **180° / 360° VR video on an ordinary flat
 monitor**, comfortably, including local 8K. Optionally it tracks your head with
 a plain webcam and turns the view for you.
 
-Version 0.2. Windows only.
+Version 0.3. Windows only.
+
+![VR Flat Player](assets/screen/screen_en.png)
+
+*The mode panel (Tab) over a VR180 file, with the uosc control bar below.*
 
 Decoding and rendering are mpv + mpv360; this repository is the player window
 and the tracking bridge between them.
@@ -121,7 +125,11 @@ compiled shader — is fetched by `tools\install-mpv360.bat` and ignored by git.
 | `Ctrl+E` | 360 mode on/off |
 | `Ctrl+Shift+P` | Cycle projection |
 | `Ctrl+Shift+E` | Swap eye |
-| `Ctrl+Shift+↑ / ↓` | Field of view |
+| `Ctrl+Shift+↑ / ↓` | Field of view, 5° a press |
+| `Ctrl+0` / wheel click | Field of view back to 80° |
+| `0` / `9` / Shift+wheel | Volume up / down |
+| `3` / `4` | Brightness down / up |
+| `1` / `2` | Contrast down / up |
 | `Ctrl+Shift+V` | Reset the view without moving the head reference |
 | `Ctrl+Shift+H` | Head tracking on/off |
 | `Ctrl+[` / `Ctrl+]` | Tracking gain down / up |
@@ -144,7 +152,10 @@ The values worth knowing:
 | `yaw.stickyDegrees` | 1.0 | Head movement ignored before the view follows |
 | `pitch.inputRangeDegrees` | 12 | People pitch their head far less than they turn it |
 | `video.fallback` | `vr180` | What a 2:1 file with no clues is opened as |
-| `source.camera.landmarkFps` | 30 | Lower it if the landmarker is starving the decoder |
+| `filter.glideMaxSeconds` | 0.30 | How far the glide may stretch when poses arrive slowly. This is what keeps a slow tracker looking smooth instead of stepped; set it equal to `glideSeconds` for a fixed glide |
+| `source.camera.landmarkFps` | 30 | Upper bound on landmark runs per second |
+| `source.camera.detectWidth` | 640 | Width the face detector sees; 0 detects on the full frame. Five times cheaper than 1280 and the box is just as usable |
+| `source.camera.trackingCpuShare` | 0.75 | Share of wall time the whole tracking pipeline may use. Lower it to spend less CPU — it multiplies the delay before the view answers your head by the same factor |
 
 Window position, per-file VR modes and the run log are kept in separate files
 (`window-state.json`, `mode-memory.json`, `mpv-last-run.log`) so that clearing
@@ -170,7 +181,7 @@ src/HeadTrackBridge/     the player: window, menus, IPC, tracking, mapping
   Tracking/              camera, landmarks, pose solving
   Mapping/               filter, gain curve, view composition
 mpv/                     our mpv configuration, scripts and shader source
-tests/VideoFormatTests/  608 assertions, runs in seconds
+tests/VideoFormatTests/  628 assertions, runs in seconds
 tools/                   install scripts, icon generator, publish
 prompt/                  development handover notes (Chinese)
 ```

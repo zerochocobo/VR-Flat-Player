@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <!-- WinExe so double-clicking the player does not also open a black console
@@ -12,8 +12,8 @@
     <!-- Windows needs a four-part FileVersion, but the version people should
          see is the short one, so both are set rather than derived. Change them
          together. -->
-    <Version>0.2.0</Version>
-    <InformationalVersion>0.2</InformationalVersion>
+    <Version>0.3</Version>
+    <InformationalVersion>0.3</InformationalVersion>
     <Product>VR Flat Player</Product>
     <AssemblyTitle>VR Flat Player</AssemblyTitle>
     <Description>Watch 180/360 VR video on a flat PC monitor, with optional webcam head tracking.</Description>
@@ -54,3 +54,6 @@
   </ItemGroup>
 
 </Project>
+
+
+

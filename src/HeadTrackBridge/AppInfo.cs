@@ -14,6 +14,17 @@ public static class AppInfo
 {
     public const string Name = "VR Flat Player";
 
+    /// <summary>
+    /// Where the source lives. Shown in the Help menu and opened in the user's
+    /// browser from there.
+    ///
+    /// This is not decoration: the player ships a GPL binary of mpv, and GPL
+    /// redistribution means the offer of source has to be findable by someone
+    /// who only ever downloaded the zip. THIRD-PARTY-NOTICES.txt names mpv's
+    /// own repository; this one names ours.
+    /// </summary>
+    public const string SourceUrl = "https://github.com/zerochocobo/VR-Flat-Player";
+
     /// <summary>Short display version, e.g. "0.1".</summary>
     public static string Version { get; } = ReadVersion();
 

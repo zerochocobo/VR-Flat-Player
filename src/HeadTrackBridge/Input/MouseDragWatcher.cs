@@ -51,6 +51,27 @@ public sealed class MouseDragWatcher : IDisposable
 
     public event Action? DragEnd;
 
+    /// <summary>
+    /// A press and release on the video that did not move — a click rather than
+    /// a drag.
+    ///
+    /// It shares every rule with a drag, which is the point: a press over the
+    /// control bar or while the mode panel is open is already excluded, so this
+    /// cannot steal a click that belongs to uosc or to vrmenu.
+    ///
+    /// The two thresholds below are what separates a click from a very short
+    /// drag. Both have to hold, because either alone is wrong: a flick of the
+    /// wrist is fast *and* moves, and resting the button down without moving is
+    /// still not a click.
+    /// </summary>
+    public event Action? Click;
+
+    /// <summary>Movement, in pixels, still counted as a click rather than a drag.</summary>
+    private const int ClickSlopPixels = 4;
+
+    /// <summary>How long the button may be held and still count as a click.</summary>
+    private static readonly TimeSpan ClickHold = TimeSpan.FromMilliseconds(400);
+
     /// <summary>Why a press did not start a drag. Diagnostics only.</summary>
     public event Action<string>? Rejected;
 
@@ -67,6 +88,12 @@ public sealed class MouseDragWatcher : IDisposable
         POINT last = default;
         var hwnd = IntPtr.Zero;   // the window the current drag started on
 
+        // Where and when the press began, for telling a click from a drag on
+        // release. Tracked separately from `last`, which moves with the cursor.
+        POINT pressAt = default;
+        var pressedAt = DateTime.MinValue;
+        var movedTooFar = false;
+
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(8));   // ~120 Hz
         while (true)
         {
@@ -77,7 +104,18 @@ public sealed class MouseDragWatcher : IDisposable
 
             if (!down)
             {
-                if (dragging) { dragging = false; DragEnd?.Invoke(); }
+                if (dragging)
+                {
+                    dragging = false;
+                    DragEnd?.Invoke();
+
+                    // Fired on release, not on press: until the button comes up
+                    // there is no way to know this was not the start of a drag,
+                    // and opening a file dialog under a held button would be
+                    // the worst possible guess.
+                    if (!movedTooFar && DateTime.UtcNow - pressedAt <= ClickHold)
+                        Click?.Invoke();
+                }
                 wasDown = false;
                 continue;
             }
@@ -95,6 +133,9 @@ public sealed class MouseDragWatcher : IDisposable
                 {
                     dragging = true;
                     last = p;
+                    pressAt = p;
+                    pressedAt = DateTime.UtcNow;
+                    movedTooFar = false;
                     DragBegin?.Invoke();
                 }
                 else
@@ -105,6 +146,12 @@ public sealed class MouseDragWatcher : IDisposable
             }
 
             if (!dragging) continue;
+
+            // Measured from the press, not from the last sample: a slow drag
+            // moves a pixel at a time and would otherwise never trip this.
+            if (Math.Abs(p.X - pressAt.X) > ClickSlopPixels ||
+                Math.Abs(p.Y - pressAt.Y) > ClickSlopPixels)
+                movedTooFar = true;
 
             var dx = p.X - last.X;
             var dy = p.Y - last.Y;

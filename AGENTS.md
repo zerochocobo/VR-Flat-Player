@@ -39,6 +39,18 @@ Concretely:
   window got in: publish produced a clean folder, then the verification runs
   dirtied it.
 
+  Broken again since, with a worse blast radius. Smoke-testing the staged exe
+  with `--source=camera` and switching tracking on left
+  `"faceTracking": true, "kind": "camera"` in the staged
+  `bridge.config.json` — so that folder would have opened the user's webcam
+  the moment it launched. The scrub cannot save you here: settings have to
+  ship, so `bridge.config.json` is the one file that is regenerated rather
+  than deleted, and running the player rewrites it after that.
+
+  The zip was clean both times, because it is packed before the testing. That
+  makes the dirty folder *harder* to notice, not easier — whichever of the two
+  the user copies from decides what they get.
+
 ## 2. Verify by running it, not by reasoning about it
 
 Claims about behaviour need a measurement. This project has a long list of

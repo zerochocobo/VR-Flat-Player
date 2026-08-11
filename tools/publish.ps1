@@ -61,6 +61,25 @@ $version = ($csproj.Project.PropertyGroup.InformationalVersion | Where-Object { 
 if (-not $version) { throw "No <InformationalVersion> in $proj." }
 Write-Host "version: $version"
 
+# The four READMEs print the version too, and being prose they cannot read it
+# from the csproj. They had been saying 0.2.8 while the build said 0.3 — the
+# same "one source of truth that quietly has two" failure the config file went
+# through, and the same fix: make the copy that cannot be generated be checked.
+foreach ($readme in @('README.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md')) {
+    $path = Join-Path $repo $readme
+    if (-not (Test-Path $path)) { continue }
+    # The version line is the only one carrying a bare x.y number in each
+    # translation; matching the number rather than the wording keeps this from
+    # depending on five languages' sentence structure.
+    $line = Select-String -Path $path -Pattern '^\D*(\d+\.\d+(\.\d+)?)\D*$' | Select-Object -First 1
+    if (-not $line) { throw "$readme has no version line." }
+    $found = $line.Matches[0].Groups[1].Value
+    if ($found -ne $version) {
+        throw "$readme says version $found but the build is $version. Update it (line $($line.LineNumber))."
+    }
+}
+Write-Host "readmes: version line agrees in all four"
+
 # The plain name is the normal x64 self-contained download. Any other build is
 # a different artifact for a different machine, so it gets its own folder and
 # zip — otherwise publishing an ARM64 or framework-dependent copy silently
@@ -128,13 +147,30 @@ if ($FrameworkDependent) {
 } else {
     $publishArgs += '--self-contained:true'
     if (-not $NoSingleFile) {
-        $publishArgs += @(
-            '-p:PublishSingleFile=true',
-            '-p:IncludeNativeLibrariesForSelfExtract=true',
-            # Roughly halves the download. Costs a fraction of a second on the
-            # first launch, which is nothing next to mpv starting up.
-            '-p:EnableCompressionInSingleFile=true'
-        )
+        # Single file, but nothing that unpacks itself at run time.
+        #
+        # The managed assemblies are bundled into the exe and loaded from
+        # memory, which costs nothing. The native ones sit beside it as ordinary
+        # DLLs. That is the whole change, and it is worth stating what it
+        # replaces:
+        #
+        # IncludeNativeLibrariesForSelfExtract cannot load a native DLL from
+        # memory -- Windows has no such call -- so it writes all of them to
+        # %TEMP%\.net\VRFlatPlayer\<hash of the bundle>\ on first launch and
+        # loads them from there. 116 MB of it, dominated by
+        # OpenCvSharpExtern.dll at 69 MB and opencv_videoio_ffmpeg at 29 MB.
+        #
+        # Nothing ever deletes those directories, and the hash changes with
+        # every build, so a development machine had 47 of them and 4.6 GB of
+        # temp. A user gets a new one per release, plus a fresh extraction
+        # whenever Disk Cleanup or Storage Sense has been through -- and this is
+        # a player people open several times a day.
+        #
+        # EnableCompressionInSingleFile goes with it. It halved the download and
+        # charged for that on every single launch, decompressing 116 MB before
+        # the window appears. The zip below compresses the same bytes once, for
+        # the one transfer that actually needs it.
+        $publishArgs += '-p:PublishSingleFile=true'
     }
 }
 
@@ -145,6 +181,12 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed ($LASTEXITCODE)." }
 
 # Debug symbols are not part of a release download.
 Get-ChildItem $stage -Filter *.pdb -Recurse | Remove-Item -Force
+
+# Nor are import libraries. The ONNX Runtime package carries onnxruntime.lib and
+# onnxruntime_providers_shared.lib for people linking against it from C++; they
+# are link-time inputs and mean nothing to a running player, but they land in the
+# output next to the DLLs and have been shipping unnoticed.
+Get-ChildItem $stage -Filter *.lib | Remove-Item -Force
 
 # ------------------------------------------------------------- bundle mpv ---
 $mpvOut = Join-Path $stage 'mpv'
@@ -191,7 +233,12 @@ Move-Item $fresh (Join-Path $stage 'bridge.config.json') -Force
 # never chosen. Window state has since moved out of bridge.config.json into its
 # own file precisely so it can be caught here — a settings file that has to ship
 # cannot simply be deleted.
-$script:RuntimeState = @('window-state.json', 'mode-memory.json', 'mpv-last-run.log')
+#
+# landmarker-loading.flag is here for a different reason than the rest: shipping
+# one would disable head tracking on a machine that was never the one that
+# crashed.
+$script:RuntimeState = @('window-state.json', 'mode-memory.json', 'mpv-last-run.log',
+                         'landmarker-loading.flag')
 
 function Remove-RuntimeState($dir) {
     foreach ($name in $script:RuntimeState) {

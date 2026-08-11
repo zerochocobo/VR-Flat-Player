@@ -28,9 +28,9 @@ namespace HeadTrackBridge.Host;
 public sealed class PlayerWindow : Form
 {
     private readonly PlayerSession _session;
-    private readonly UiStrings _t;
+    private UiStrings _t;
     private readonly Panel _video;
-    private readonly MenuStrip _menu;
+    private MenuStrip _menu;
     private readonly System.Windows.Forms.Timer _fitTimer;
 
     // Mirrored from mpv rather than tracked independently: uosc, the mode panel
@@ -45,6 +45,7 @@ public sealed class PlayerWindow : Form
     private long? _subTrack;
     private JsonElement? _playlist;
     private int? _playlistPos;
+    private bool _hasFile;
 
     private Rectangle _windowedBounds;
     private FormWindowState _windowedState = FormWindowState.Normal;
@@ -89,6 +90,17 @@ public sealed class PlayerWindow : Form
         // the video have to reach us so they can dismiss the dropdown.
         _menu.MenuActivate += (_, _) => SetMenuOpen(true);
         _menu.MenuDeactivate += (_, _) => SetMenuOpen(false);
+
+        // An empty player is a black rectangle with no affordance at all, and
+        // clicking it is the first thing anyone tries. Only when empty: during
+        // playback a click on the video is how a drag ends, and hijacking it
+        // would make the view impossible to steer.
+        _session.VideoClicked += () => RunOnUi(() =>
+        {
+            if (_hasFile) return;
+            Console.WriteLine("\n  [host] click on an empty player — opening a file");
+            OpenFile();
+        });
 
         // The hotkey path (Ctrl+Shift+B) reaches the session directly, so the
         // offer to restart has to come from here rather than from the menu item.
@@ -370,6 +382,16 @@ public sealed class PlayerWindow : Form
     {
         switch (name)
         {
+            // Already observed by the session for its own reasons. Read here so
+            // the window knows whether there is anything on screen, which is
+            // what decides if a click on the black rectangle should open a file.
+            // `path` rather than `playlist-pos`: the latter is set while a file
+            // is still loading and stays set after one fails.
+            case "path":
+                _hasFile = value is { ValueKind: JsonValueKind.String } p &&
+                           !string.IsNullOrWhiteSpace(p.GetString());
+                break;
+
             case "media-title":
                 var title = value?.ValueKind == JsonValueKind.String ? value.Value.GetString() : null;
                 RunOnUi(() => Text = string.IsNullOrWhiteSpace(title)
@@ -451,48 +473,15 @@ public sealed class PlayerWindow : Form
         return true;
     }
 
-    private const int WmMouseWheel = 0x020A;
-
     /// <summary>
-    /// Scroll wheel over the video zooms, by narrowing or widening the field of
-    /// view.
+    /// Degrees of field of view per step, for the menu.
+    ///
+    /// The wheel and the keys use the same number, set in mpv/input.conf, which
+    /// is where mouse input actually arrives — mpv's child window is enabled so
+    /// that uosc can see hover and clicks, and that means it, not the host,
+    /// receives the wheel. A WndProc handler here looked right and never ran;
+    /// what the user got was mpv's built-in wheel binding, volume.
     /// </summary>
-    /// <remarks>
-    /// Handled here and not by mpv, and it has to be: mpv's window is a
-    /// <c>WS_DISABLED</c> child, so it receives no mouse input whatsoever and a
-    /// WHEEL_UP binding in input.conf could never fire. This is the same reason
-    /// drag-to-look is done host-side.
-    ///
-    /// Windows delivers the wheel to the focused window rather than the one
-    /// under the cursor, so this arrives at the form no matter which child the
-    /// pointer is over — hence the check that it really is over the video and
-    /// not the menu bar.
-    ///
-    /// Up narrows the field of view, which is what "zoom in" means everywhere
-    /// else: the subject gets bigger.
-    /// </remarks>
-    protected override void WndProc(ref Message m)
-    {
-        if (m.Msg == WmMouseWheel && !_menuOpen && _session.Mode is { } mode)
-        {
-            // Position comes from the message, not from Cursor.Position. It is
-            // where the pointer was when the wheel turned, which is the thing
-            // being asked about; the live cursor may have moved on by now. It
-            // also means the path can be exercised by posting the message.
-            var delta = (short)((long)m.WParam >> 16);
-            var lp = (long)m.LParam;
-            var where = new Point(unchecked((short)(lp & 0xFFFF)), unchecked((short)((lp >> 16) & 0xFFFF)));
-            var over = _video.RectangleToScreen(_video.ClientRectangle).Contains(where);
-            if (delta != 0 && over)
-            {
-                _ = mode.AdjustFovAsync(delta > 0 ? -FovStepDegrees : FovStepDegrees);
-                return;
-            }
-        }
-        base.WndProc(ref m);
-    }
-
-    /// <summary>Degrees of field of view per wheel notch.</summary>
     private const double FovStepDegrees = 5;
 
     // -------------------------------------------------------- fullscreen ---
@@ -738,9 +727,14 @@ public sealed class PlayerWindow : Form
         var menu = Menu("menu.audio",
             tracks,
             new ToolStripSeparator(),
-            Item("audio.volUp", () => Send("add", "volume", 5)),
-            Item("audio.volDown", () => Send("add", "volume", -5)),
-            mute);
+            // Same step as input.conf, so the menu and the keys agree. The keys
+            // were there all along as mpv defaults, at a different step and
+            // advertised nowhere; both halves of that are fixed now.
+            Shortcut(Item("audio.volUp", () => Send("add", "volume", 5)),
+                     $"0 / Shift+{_t["key.wheelUp"]}"),
+            Shortcut(Item("audio.volDown", () => Send("add", "volume", -5)),
+                     $"9 / Shift+{_t["key.wheelDown"]}"),
+            Shortcut(mute, "M"));
 
         menu.DropDownOpening += (_, _) =>
         {
@@ -773,14 +767,29 @@ public sealed class PlayerWindow : Form
         var menu = Menu("menu.vr",
             geometry, stereo, eye,
             new ToolStripSeparator(),
-            Item("vr.fovIn", () => _ = _session.Mode?.AdjustFovAsync(-5)),
-            Item("vr.fovOut", () => _ = _session.Mode?.AdjustFovAsync(5)),
-            Item("vr.fovReset", () => _ = _session.Mode?.SetFovAsync(120)),
+            // Same step as the wheel and the keys, so the three agree. The
+            // mouse names are looked up rather than written in: they are the
+            // only part of a shortcut hint that is a word instead of a key cap,
+            // and they were the one thing in this menu still in English on a
+            // Chinese install.
+            Shortcut(Item("vr.fovIn", () => _ = _session.Mode?.AdjustFovAsync(-FovStepDegrees)),
+                     $"Ctrl+Shift+↑ / {_t["key.wheelUp"]}"),
+            Shortcut(Item("vr.fovOut", () => _ = _session.Mode?.AdjustFovAsync(FovStepDegrees)),
+                     $"Ctrl+Shift+↓ / {_t["key.wheelDown"]}"),
+            // Was a hardcoded 120, left behind when the default became 80: the
+            // menu's own reset put the picture somewhere the player never
+            // starts. One constant now, on the controller that owns it.
+            Shortcut(Item("vr.fovReset",
+                          () => _ = _session.Mode?.SetFovAsync(PlayerModeController.DefaultFovDegrees)),
+                     $"Ctrl+0 / {_t["key.wheelClick"]}"),
             new ToolStripSeparator(),
-            Shortcut(Item("vr.resetView", () => _session.Mapper.ResetView()), "Ctrl+Shift+V"),
-            // Home, not Ctrl+Shift+R. Both are bound; the menu advertises the
-            // one worth learning, and this is the action reached for most.
-            Shortcut(Item("vr.recenter", () => _session.Mapper.RequestRecenter()), "Home"),
+            // Reset View stays here and Recentre Head Position has moved to the
+            // Camera menu. Sitting side by side they read as two names for one
+            // action, and only one of them does anything without a camera:
+            // recentring redefines what "straight ahead" means for the *head*,
+            // and with no head being tracked there is nothing to redefine.
+            Hint(Shortcut(Item("vr.resetView", () => _session.Mapper.ResetView()), "Ctrl+Shift+V"),
+                 "vr.resetView.hint"),
             new ToolStripSeparator(),
             Shortcut(Item("vr.panel", () => Key("TAB")), "Tab"));
 
@@ -849,10 +858,17 @@ public sealed class PlayerWindow : Form
             new ToolStripSeparator(),
             Item("vr.sensReset", _session.ResetGain));
 
+        // Home, not Ctrl+Shift+R. Both are bound; the menu advertises the one
+        // worth learning, and this is the action reached for most.
+        var recentre = Hint(
+            Shortcut(Item("vr.recenter", () => _session.Mapper.RequestRecenter()), "Home"),
+            "vr.recenter.hint");
+
         var menu = Menu("menu.camera",
             Item("cam.test", RunCameraTest),
             new ToolStripSeparator(),
             Shortcut(tracking, "Ctrl+Shift+H"),
+            recentre,
             sensitivity);
 
         menu.DropDownOpening += (_, _) =>
@@ -862,6 +878,11 @@ public sealed class PlayerWindow : Form
             // turning it on is what starts the camera.
             tracking.Enabled = true;
             tracking.Checked = _session.TrackingEnabled;
+
+            // Recentring is the opposite case: it acts on the next pose to
+            // arrive, so with tracking off it silently does nothing at all.
+            // Greyed rather than hidden, so the reason is visible.
+            recentre.Enabled = _session.TrackingEnabled;
 
             // The number is the point: "Less Sensitive" with nothing to compare
             // against gives no sense of how far you have moved or how far is left.
@@ -937,11 +958,44 @@ public sealed class PlayerWindow : Form
             shapeItems.Add((item, ratio));
         }
 
+        // Picture controls, and the keys beside them are the ones mpv actually
+        // has, checked against the bundled build rather than remembered: 1/2 is
+        // contrast and 3/4 is brightness, which is one pair off from where most
+        // people expect brightness to be. Measured by setting each property to
+        // zero, sending the keypress over IPC and reading it back.
+        //
+        // Step 5, not mpv's own 1. A menu entry you have to click twenty times
+        // is not a control. The keys keep their step, so the two disagree by
+        // design — the same trade the field of view refuses, and the reason it
+        // is different here is that mpv owns these bindings and we do not.
+        const int PicStep = 5;
+        var picture = Menu("view.picture",
+            Shortcut(Item("pic.brightUp", () => Send("add", "brightness", PicStep)), "4"),
+            Shortcut(Item("pic.brightDown", () => Send("add", "brightness", -PicStep)), "3"),
+            new ToolStripSeparator(),
+            Shortcut(Item("pic.contrastUp", () => Send("add", "contrast", PicStep)), "2"),
+            Shortcut(Item("pic.contrastDown", () => Send("add", "contrast", -PicStep)), "1"),
+            new ToolStripSeparator(),
+            Shortcut(Item("pic.saturationUp", () => Send("add", "saturation", PicStep)), "8"),
+            Shortcut(Item("pic.saturationDown", () => Send("add", "saturation", -PicStep)), "7"),
+            new ToolStripSeparator(),
+            Shortcut(Item("pic.gammaUp", () => Send("add", "gamma", PicStep)), "6"),
+            Shortcut(Item("pic.gammaDown", () => Send("add", "gamma", -PicStep)), "5"),
+            new ToolStripSeparator(),
+            Item("pic.reset", () =>
+            {
+                foreach (var p in new[] { "brightness", "contrast", "saturation", "gamma" })
+                    SetProperty(p, 0);
+            }));
+
         var menu = Menu("menu.view",
             Shortcut(fullscreen, "F"),
             onTop,
             new ToolStripSeparator(),
             shape,
+            picture,
+            new ToolStripSeparator(),
+            LanguageMenu(),
             new ToolStripSeparator(),
             Shortcut(Item("view.stats", () => Send("script-binding", "stats/display-page-1-toggle")), "Ctrl+Shift+I"));
 
@@ -997,10 +1051,206 @@ public sealed class PlayerWindow : Form
     private ToolStripMenuItem HelpMenu() => Menu("menu.help",
         Item("help.keys", () => MessageBox.Show(this, _t["keys.body"], _t["help.keys"],
                                                 MessageBoxButtons.OK, MessageBoxIcon.None)),
-        Item("help.about", () => MessageBox.Show(
-            this,
-            AppInfo.NameAndVersion + Environment.NewLine + Environment.NewLine + _t["about.body"],
-            _t["help.about"], MessageBoxButtons.OK, MessageBoxIcon.None)));
+        new ToolStripSeparator(),
+        // The URL as the tooltip, so hovering shows where the entry goes before
+        // it opens a browser. Not the label text, which Hint() would give.
+        SourceItem(),
+        new ToolStripSeparator(),
+        Item("help.about", ShowAbout));
+
+    /// <summary>
+    /// About, as a small form rather than a MessageBox.
+    ///
+    /// The only reason it is not a MessageBox: that control renders plain text,
+    /// so the project URL sat there as characters to be retyped by hand. A
+    /// LinkLabel is the whole difference — everything else here is the same
+    /// three pieces of text.
+    /// </summary>
+    private void ShowAbout()
+    {
+        using var dlg = new Form
+        {
+            Text = _t["help.about"],
+            Icon = AppInfo.Icon,
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            MinimizeBox = false,
+            MaximizeBox = false,
+            ShowInTaskbar = false,
+            // AutoSize over fixed numbers: the body text is five translations
+            // long and the longest of them decides the width, not this machine.
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Padding = new Padding(16),
+        };
+
+        var layout = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+        };
+
+        var title = new Label { Text = AppInfo.NameAndVersion, AutoSize = true, Margin = new Padding(3, 3, 3, 10) };
+        // Disposed with the form. A Font assigned to a control is not owned by
+        // it, so without this every visit to About leaks one — small, but this
+        // dialog is the kind of thing people open twice while looking for a
+        // version number.
+        var titleFont = new Font(title.Font, FontStyle.Bold);
+        title.Font = titleFont;
+        dlg.Disposed += (_, _) => titleFont.Dispose();
+
+        var body = new Label
+        {
+            Text = _t["about.body"],
+            AutoSize = true,
+            MaximumSize = new Size(460, 0),
+            Margin = new Padding(3, 3, 3, 12),
+        };
+
+        var link = new LinkLabel { Text = AppInfo.SourceUrl, AutoSize = true, Margin = new Padding(3, 3, 3, 12) };
+        link.LinkClicked += (_, _) => OpenInBrowser(AppInfo.SourceUrl);
+
+        var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, AutoSize = true, Anchor = AnchorStyles.Right };
+
+        layout.Controls.Add(title);
+        layout.Controls.Add(body);
+        layout.Controls.Add(link);
+        layout.Controls.Add(ok);
+        dlg.Controls.Add(layout);
+        dlg.AcceptButton = ok;
+        dlg.CancelButton = ok;
+
+        dlg.ShowDialog(this);
+    }
+
+    /// <summary>
+    /// Language names in their own language, never translated.
+    ///
+    /// "简体中文" has to read as itself in a Japanese menu, because the person
+    /// who needs that entry is the one who cannot read the menu it is in. The
+    /// config value is the tag; "auto" means follow Windows, which is what a
+    /// release ships with and what publish.ps1 regenerates.
+    /// </summary>
+    private static readonly (string Tag, string Name)[] Languages =
+    [
+        ("en", "English"),
+        ("zh-CN", "简体中文"),
+        ("zh-TW", "繁體中文"),
+        ("ja", "日本語"),
+        ("ko", "한국어"),
+    ];
+
+    private ToolStripMenuItem LanguageMenu()
+    {
+        var menu = Menu("view.language");
+        var configured = _session.Config.Ui.Language;
+
+        var auto = new ToolStripMenuItem(_t["lang.auto"]) { Checked = IsAuto(configured) };
+        auto.Click += (_, _) => ApplyLanguage("auto");
+        menu.DropDownItems.Add(auto);
+        menu.DropDownItems.Add(new ToolStripSeparator());
+
+        foreach (var (tag, name) in Languages)
+        {
+            var item = new ToolStripMenuItem(name)
+            {
+                Checked = !IsAuto(configured) &&
+                          tag.Equals(configured, StringComparison.OrdinalIgnoreCase),
+            };
+            var chosen = tag;
+            item.Click += (_, _) => ApplyLanguage(chosen);
+            menu.DropDownItems.Add(item);
+        }
+
+        menu.ToolTipText = _t["lang.note"];
+        return menu;
+
+        static bool IsAuto(string v) =>
+            string.IsNullOrWhiteSpace(v) || v.Equals("auto", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Switches the menu bar's language now and remembers the choice.
+    ///
+    /// The menu bar is rebuilt rather than walked and relabelled: every entry's
+    /// text, every shortcut hint and every tooltip comes from the table, and
+    /// the submenus are built on open from the same table again. Rebuilding is
+    /// the only version of this that cannot leave one string behind.
+    ///
+    /// mpv's side — uosc's control bar and the mode panel — is passed as
+    /// --script-opts when mpv is launched, so it follows on the next start. Said
+    /// so in the tooltip rather than left to be discovered.
+    /// </summary>
+    private void ApplyLanguage(string tag)
+    {
+        _session.Config.Ui.Language = tag;
+        _session.SaveSettings();
+
+        UiStrings.Init(Localization.ResolveOwnLanguage(tag));
+        _t = UiStrings.Current;
+
+        // Rebuilt after this click has finished unwinding, never during it.
+        //
+        // The call arrives from a ToolStripMenuItem's own Click handler, and the
+        // strip is still mid-dispatch: disposing it here would pull the object
+        // out from under the code that is about to return through it. BeginInvoke
+        // puts the work on the next message-loop turn, by which time the menu has
+        // closed and nothing is left on the stack.
+        BeginInvoke(() =>
+        {
+            var wasEnabled = _menu.Enabled;
+            var old = _menu;
+
+            _menu = BuildMenu();
+            _menu.Enabled = wasEnabled;
+            _menu.MenuActivate += (_, _) => SetMenuOpen(true);
+            _menu.MenuDeactivate += (_, _) => SetMenuOpen(false);
+
+            // Swap first, then drop the old one: removing before the
+            // replacement exists leaves a frame with no menu bar, and the
+            // layout below would measure that.
+            Controls.Add(_menu);
+            MainMenuStrip = _menu;
+            Controls.Remove(old);
+            old.Dispose();
+
+            // The menu bar's height is part of the layout arithmetic and a
+            // different language can change it, so the video child is re-fitted
+            // rather than left at the old offset.
+            MpvChild.FitToParent(_video.Handle, wantEnabled: !_menuOpen);
+        });
+    }
+
+    private ToolStripMenuItem SourceItem()
+    {
+        var item = Item("help.source", () => OpenInBrowser(AppInfo.SourceUrl));
+        item.ToolTipText = AppInfo.SourceUrl;
+        return item;
+    }
+
+    /// <summary>
+    /// Hands a URL to whatever the user has set as their browser.
+    ///
+    /// UseShellExecute is required: without it .NET tries to run the URL as an
+    /// executable and throws. Failures are shown rather than swallowed — a
+    /// menu entry that does nothing at all is indistinguishable from a broken
+    /// player.
+    /// </summary>
+    private void OpenInBrowser(string url)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"{url}{Environment.NewLine}{Environment.NewLine}{ex.Message}",
+                            _t["help.source"], MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+    }
 
     // --------------------------------------------------------- menu plumbing ---
 
@@ -1027,6 +1277,16 @@ public sealed class PlayerWindow : Form
     private static ToolStripMenuItem Shortcut(ToolStripMenuItem item, string display)
     {
         item.ShortcutKeyDisplayString = display;
+        return item;
+    }
+
+    /// <summary>
+    /// A sentence on hover, for an entry whose name cannot carry the whole
+    /// meaning. Used where two entries sound alike and do different things.
+    /// </summary>
+    private ToolStripMenuItem Hint(ToolStripMenuItem item, string key)
+    {
+        item.ToolTipText = _t[key];
         return item;
     }
 

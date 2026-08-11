@@ -24,8 +24,33 @@ public sealed class BridgeConfig
     /// If no pose arrives for this long, freeze the view where it is and warn.
     /// Never snap back to centre — that is the single most disorienting thing a
     /// head-tracked player can do.
+    ///
+    /// A floor, not the whole answer: the mapper stretches it to three times the
+    /// measured pose interval. Half a second is four missed poses at 30 a
+    /// second and barely one and a half at three, so on a slow machine a fixed
+    /// 0.5 declares the tracker dead between two perfectly ordinary samples. A
+    /// real session's log is full of the result — the status line alternating
+    /// live / LOST while the camera was working exactly as designed, and the
+    /// view freezing each time, which reads as the stutter it was mistaken for.
     /// </summary>
     public double TrackingTimeoutSeconds { get; set; } = 0.5;
+
+    /// <summary>
+    /// Missed poses before the view is frozen, as a multiple of the measured
+    /// pose interval. 0 = use <see cref="TrackingTimeoutSeconds"/> alone.
+    ///
+    /// Three, and the case it exists for is arithmetic rather than taste: a
+    /// tracker managing 1.5 poses a second has a 667 ms gap, so a fixed 500 ms
+    /// timeout declares a dropout after *every single pose* and the view never
+    /// unfreezes. Below about two poses a second the fixed number stops meaning
+    /// anything at all.
+    ///
+    /// It does not explain the dropouts in the log that prompted it. Those were
+    /// real: the face went unfound for up to 3.4 seconds at a stretch, which no
+    /// timeout should paper over. See the note on
+    /// <see cref="CameraConfig.ScoreThreshold"/>.
+    /// </summary>
+    public double TrackingTimeoutPoseGaps { get; set; } = 3.0;
 
     public static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -87,13 +112,56 @@ public sealed class CameraConfig
     public int Fps { get; set; } = 30;
 
     /// <summary>
+    /// Frame width the face *detector* sees, independent of <see cref="Width"/>.
+    /// 0 = detect on the full frame.
+    ///
+    /// These are two different jobs and they want two different resolutions.
+    /// The landmarker needs the pixels — its precision is what sets the pose
+    /// noise, which is why the capture is 1280x720. The detector only has to
+    /// return a rectangle for the landmarker to crop, and it pays for every
+    /// pixel it is given. Measured here, YuNet on one OpenCV thread:
+    ///
+    ///     detect size   ms/call   core-seconds/call
+    ///      1280x720       118.3               0.116
+    ///       640x360        23.9               0.024
+    ///       320x180         7.0               0.007
+    ///
+    /// Five times cheaper in both, for a box that moves by two full-res pixels
+    /// at worst — and the crop around it carries 60% margin, so two pixels do
+    /// not move a landmark. Detecting at full resolution was costing four times
+    /// the landmarker's own call and was the single largest item in the loop.
+    ///
+    /// 320 is cheaper again, and left as an option rather than the default:
+    /// there is no measurement here of what it does to detection *quality* on a
+    /// real face, and a missed face costs far more than 17 ms.
+    /// </summary>
+    public int DetectWidth { get; set; } = 640;
+
+    /// <summary>
     /// Flip horizontally. On by default: a camera facing you produces a
     /// mirror image, and without the flip turning your head left moves the
     /// view right.
     /// </summary>
     public bool Mirror { get; set; } = true;
 
-    /// <summary>Detector confidence floor. Lower finds faces in worse light and more false ones.</summary>
+    /// <summary>
+    /// Detector confidence floor. Lower finds faces in worse light and more
+    /// false ones.
+    ///
+    /// Worth suspecting when the log reports the face found on well under 100%
+    /// of frames. A session on a slow machine showed 36% in its worst window,
+    /// with runs of frames finding nothing at all and gaps between poses
+    /// reaching 3.4 seconds — which freezes the view, and reads as far worse
+    /// than the low pose rate it was blamed on.
+    ///
+    /// Untested here, and stated as a suspicion rather than a finding: this
+    /// machine has no usable camera, and the same session was also the first to
+    /// run with <see cref="DetectWidth"/> at 640 rather than the full frame. A
+    /// smaller picture gives the detector less to be confident about, so a
+    /// threshold chosen at 1280x720 may simply be too high at 640. The two can
+    /// be separated in one run — set DetectWidth to 0 and compare the percentage
+    /// the log now prints.
+    /// </summary>
     public double ScoreThreshold { get; set; } = 0.7;
 
     /// <summary>YuNet ONNX model, relative to the install directory.</summary>
@@ -133,6 +201,39 @@ public sealed class CameraConfig
     /// does not give a wobbling angle that averages back to the truth.
     /// </summary>
     public double LandmarkSmoothing { get; set; } = 0.5;
+
+    /// <summary>
+    /// The most wall-clock time head tracking may spend, as a fraction.
+    ///
+    /// Covers the whole pipeline — frame conversion, face detection, landmarks,
+    /// the pose solve — not just the landmarker. It was the landmarker alone at
+    /// first, which missed the expensive half: the detector runs on every
+    /// camera frame, and OpenCV parallelises it across every core.
+    ///
+    /// A rate limit alone does nothing when the model cannot reach the rate.
+    /// Asking for 30 a second from a call that costs 58 ms leaves the loop
+    /// running flat out at 100% duty against a video decoder that needs the
+    /// same cores — which is why switching tracking on during 4K60 playback
+    /// made the whole player crawl, the close button included.
+    ///
+    /// 0.75, up from 0.35, and the change is a correction rather than a
+    /// retuning. This multiplies the loop's period by 1/share, so it multiplies
+    /// the delay before the view answers your head by the same factor. At 0.35
+    /// that is 2.9x, on top of a loop that was already slow because the
+    /// detector was running at full resolution: measured here, 150 ms of work
+    /// became a 429 ms cycle, about 2 poses a second. The player was reported
+    /// as very choppy, and this is most of why.
+    ///
+    /// The other part of the correction is <see cref="DetectWidth"/>. With the
+    /// detector at 640 the same loop costs about 56 ms, so 0.75 gives a 75 ms
+    /// cycle — around 13 poses a second at roughly one core, against 8 a second
+    /// at nearly four cores before any of this was added. Better on both axes
+    /// than the version nobody complained about.
+    ///
+    /// Lower it if tracking still costs too much on a slow machine; the cost it
+    /// buys back is responsiveness, directly and proportionally.
+    /// </summary>
+    public double TrackingCpuShare { get; set; } = 0.75;
 }
 
 public sealed class SourceConfig
@@ -202,6 +303,39 @@ public sealed class FilterConfig
     /// would just be lag, since the thing it was hiding is gone.
     /// </summary>
     public double GlideSeconds { get; set; } = 0.08;
+
+    /// <summary>
+    /// Upper end of the glide, used when poses arrive more slowly than
+    /// <see cref="GlideSeconds"/> can cover. Set equal to it to go back to a
+    /// fixed glide.
+    ///
+    /// A fixed glide is a constant tuned for a pose rate the tracker may not
+    /// reach, and getting it wrong does not read as lag — it reads as stutter.
+    /// The glide finishes in about 80 ms whatever the gap, so on a machine
+    /// producing three poses a second the view completes its move and then
+    /// stands still for a quarter of a second before the next one lands. That
+    /// is the "it jumps to the next angle instead of moving smoothly" report,
+    /// and it is why the same code felt right at 0.2.0 and wrong later: the
+    /// mapper never changed, the pose rate did.
+    ///
+    /// Measured by driving the real mapper with a steady 4 deg/s turn at a
+    /// 120 Hz output rate. Share of output frames with the picture frozen, and
+    /// how much faster the fastest moment is than the average:
+    ///
+    ///     poses/s   fixed 0.08        glide = the pose gap
+    ///        13      0%   x1.8         0%   x1.8
+    ///         8      0%   x2.3         0%   x1.9
+    ///         6      0%   x2.8         0%   x1.9
+    ///         4      0%   x3.8         0%   x1.9
+    ///       2.3     27%   x6.3         0%   x2.1
+    ///
+    /// Tracking the gap costs lag — 3.0 degrees against 0.7 at 2.3 poses a
+    /// second — and that is the right trade. A view that is smoothly a little
+    /// behind is watchable; one that teleports every 400 ms is not. On a
+    /// machine that keeps up, the gap is under GlideSeconds and this does
+    /// nothing at all.
+    /// </summary>
+    public double GlideMaxSeconds { get; set; } = 0.30;
 }
 
 public sealed class AxisConfig

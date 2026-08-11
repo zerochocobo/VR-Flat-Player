@@ -7,7 +7,11 @@
 在**普通显示器**上舒服地观看 **180° / 360° VR 视频**的桌面播放器,支持本地 8K。
 可选用普通摄像头追踪头部动作,自动转动视角。
 
-版本 0.2,仅支持 Windows。
+版本 0.3,仅支持 Windows。
+
+![VR 视频平面播放器](assets/screen/screen_zh-CN.png)
+
+*Tab 打开的模式面板，下方是 uosc 控制栏。*
 
 > 英文名 **VR Flat Player**,可执行文件、发布目录和安装路径都用英文名
 > (`VRFlatPlayer.exe`、`dist\VR Flat Player\`)—— 路径里避开非 ASCII 字符,
@@ -113,7 +117,11 @@ mpv 是独立的 GPL 程序,**以独立进程的形式随发布包分发,不是�
 | `Ctrl+E` | 开关 360 模式 |
 | `Ctrl+Shift+P` | 循环投影格式 |
 | `Ctrl+Shift+E` | 切换眼别 |
-| `Ctrl+Shift+↑ / ↓` | 视场角 |
+| `Ctrl+Shift+↑ / ↓` | 视场角,一次 5° |
+| `Ctrl+0` / 按下滚轮 | 视场角复位到 80° |
+| `0` / `9` / Shift+滚轮 | 增大 / 减小音量 |
+| `3` / `4` | 调暗 / 调亮 |
+| `1` / `2` | 降低 / 提高对比度 |
 | `Ctrl+Shift+V` | 视角复位(不改变头部参考) |
 | `Ctrl+Shift+H` | 开关头部追踪 |
 | `Ctrl+[` / `Ctrl+]` | 追踪增益 − / + |
@@ -135,7 +143,10 @@ mpv 原有的按键(空格、方向键、音量)照常可用。
 | `yaw.stickyDegrees` | 1.0 | 头动多少度以内画面完全不动 |
 | `pitch.inputRangeDegrees` | 12 | 人点头的幅度远小于摇头 |
 | `video.fallback` | `vr180` | 毫无线索的 2:1 文件按什么打开 |
-| `source.camera.landmarkFps` | 30 | 模型抢解码器 CPU 时调低它 |
+| `filter.glideMaxSeconds` | 0.30 | 姿态来得慢时，滑行时间最多拉到多长。慢机器上画面看起来是平滑移动还是一顿一顿，就取决于它；设成和 `glideSeconds` 相等即恢复固定滑行 |
+| `source.camera.landmarkFps` | 30 | 关键点模型每秒最多跑几次 |
+| `source.camera.detectWidth` | 640 | 人脸检测器看到的画面宽度；0 表示用整帧。比 1280 便宜五倍，框一样够用 |
+| `source.camera.trackingCpuShare` | 0.75 | 整条追踪流水线允许占用的时间比例。调低省 CPU —— 但画面跟上头部动作的延迟会按同样倍数变大 |
 
 窗口位置、每个文件的 VR 模式、运行日志分别存在
 `window-state.json`、`mode-memory.json`、`mpv-last-run.log` 里 ——
@@ -158,7 +169,7 @@ src/HeadTrackBridge/     播放器本体:窗口、菜单、IPC、追踪、映射
   Tracking/              摄像头、关键点、姿态解算
   Mapping/               滤波、增益曲线、视角合成
 mpv/                     我们自己的 mpv 配置、脚本、着色器源码
-tests/VideoFormatTests/  608 条断言,几秒钟跑完
+tests/VideoFormatTests/  628 条断言,几秒钟跑完
 tools/                   安装脚本、图标生成、打包
 prompt/                  开发交接记录(中文)
 ```

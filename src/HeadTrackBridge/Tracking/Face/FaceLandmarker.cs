@@ -45,24 +45,52 @@ public sealed class FaceLandmarker : IDisposable
                 $"Landmarker model not found at {modelPath}. Run tools\\install-models.bat.",
                 modelPath);
 
-        // Four intra-op threads, and this is measured rather than reasoned.
+        // Two intra-op threads, down from four. Measured on this model, on an
+        // eight-core machine, with spinning off as configured below — the
+        // earlier table here was taken before that and read high:
         //
-        // The reasoning said to cap it hard so the video decoder keeps its
-        // cores. The benchmark said otherwise: on an 8-core machine, per call,
-        // 1 thread 575 ms, 2 threads 362 ms, 4 threads 261 ms, unrestricted
-        // 273 ms. Throttling to 2 made it a third slower, so it occupied the
-        // CPU *longer* for the same work — the opposite of the intent.
+        //     threads   ms/call   core-seconds/call
+        //           1      44.6               0.045
+        //           2      26.6               0.052
+        //           4      22.8               0.073
         //
-        // Four is the floor of that curve. Do not lower it expecting to be
-        // kinder to the rest of the system; the measurement says that trade
-        // does not exist.
+        // Two is the knee, twice over: it buys 40% of the latency off one
+        // thread for 16% more CPU, and four buys only 14% more for another 40%.
+        // Stable across repeated passes, which the first attempt at this table
+        // was not.
+        //
+        // It matters because these are ORT's own threads, created once with
+        // this session and kept for its lifetime. They inherit the priority of
+        // whichever thread built the session — the camera thread, BelowNormal —
+        // so the session must be constructed there and nowhere else. Four of
+        // them were enough to make the whole player unresponsive on a laptop
+        // playing 4K60 the moment tracking was switched on.
+        //
+        // Note what this is *not* the cause of. When the player was reported as
+        // very choppy, the suspicion fell here and the measurement cleared it:
+        // 27 ms was never the problem next to a face detector costing 118 ms a
+        // frame on the same loop. See CameraFaceSource.DetectWidth.
         var options = new SessionOptions
         {
-            IntraOpNumThreads = 4,
+            IntraOpNumThreads = 2,
             InterOpNumThreads = 1,
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
             ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
         };
+
+        // Do not let the thread pool spin.
+        //
+        // ORT's pools busy-wait for work by default, which is right when you are
+        // chasing latency and wrong for a background task: between calls the
+        // pool would burn whole cores waiting for work that is deliberately
+        // spaced out by the duty-cycle budget in CameraFaceSource.
+        //
+        // Added while chasing a hang that turned out to be an access violation
+        // instead, so this fixes nothing about that. It is kept on its own
+        // merits — a tracker that must lose to the video decoder has no business
+        // spinning.
+        options.AddSessionConfigEntry("session.intra_op.allow_spinning", "0");
+        options.AddSessionConfigEntry("session.inter_op.allow_spinning", "0");
 
         _session = new InferenceSession(modelPath, options);
         _inputName = _session.InputMetadata.Keys.First();
