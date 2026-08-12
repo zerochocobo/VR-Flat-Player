@@ -174,15 +174,46 @@ public sealed class UiStrings
 
         ["menu.camera"] = "&Camera",
         ["cam.test"] = "Test Camera...",
-        ["cam.busyBody"] =
-            "Head tracking is already using the camera, and a camera can only be "
-            + "opened by one thing at a time." + Sep
-            + "Turn head tracking off first, then try again.",
+        ["cam.test.hint"] =
+            "Opens a window showing what the camera sees — the face landmarks, the hand "
+            + "landmarks, or both, depending on what is switched on. Head tracking and "
+            + "gesture control pause while it is open and resume when you close it.",
         ["cam.startFailedBody"] =
             "The camera could not be started." + Sep
             + "If the face detector is missing, run tools\\install-models.bat. Otherwise "
             + "check that nothing else is using the camera, and that camera access is "
             + "allowed under Windows Settings > Privacy > Camera.",
+
+        ["cam.resolution"] = "Camera Resolution",
+        ["cam.resolution.hint"] =
+            "How many pixels the camera captures. It matters most if you sit well back: the "
+            + "68-point model crops the face out of the full-size frame, so its precision — and "
+            + "how smoothly the view follows your head — scales with how many pixels your face "
+            + "covers. Higher costs more per frame, and a camera that does not have the mode "
+            + "will quietly give you its nearest one. Reopens the camera.",
+        ["cam.res720"] = "1280 x 720  (720p)",
+        ["cam.res1080"] = "1920 x 1080  (1080p)",
+        ["cam.res1440"] = "2560 x 1440  (1440p)",
+        ["cam.res2160"] = "3840 x 2160  (2160p)",
+        ["cam.gestures"] = "Gesture Control",
+        ["cam.gestures.hint"] =
+            "Watch the camera for hand gestures. Hold an open palm still in front of it for a "
+            + "second to enter gesture mode, and again to leave. Head tracking pauses while "
+            + "gesture mode is on.",
+        ["cam.gestureHelp"] = "Gesture Guide...",
+        ["gestures.title"] = "Hand Gestures",
+        ["gestures.body"] =
+            "Hold an OPEN PALM still in front of the camera for a second to enter gesture "
+            + "mode, and hold it again to leave. Nothing below does anything outside gesture "
+            + "mode, and head tracking pauses while you are in it." + Sep
+            + "Inside gesture mode:" + Sep
+            + "    Fist  —  play / pause\n"
+            + "    Index finger left or right  —  back 10 s / forward 30 s\n"
+            + "    Thumb up or down  —  volume up / down\n"
+            + "        in a VR file: narrower / wider field of view\n"
+            + "    Open palm swept left or right  —  previous / next file" + Sep
+            + "Hold each shape still for about a quarter of a second. Gesture mode also ends "
+            + "on its own after five seconds with no hand in view.",
 
         ["menu.view"] = "Vie&w",
         ["view.fullscreen"] = "Fullscreen",
@@ -242,6 +273,29 @@ public sealed class UiStrings
         ["osd.trackingOff"] = "head tracking: off",
         ["osd.trackingLost"] = "head tracking: signal lost — view held",
         ["osd.trackingBack"] = "head tracking: signal back",
+        ["osd.gestureEnabled"] = "gesture control: on — hold an open palm to the camera",
+        ["osd.gestureDisabled"] = "gesture control: off",
+        ["osd.gestureOn"] = "gesture mode — head tracking paused",
+        ["osd.gestureOnAlone"] = "gesture mode",
+        ["osd.cameraSizeDiffers"] = "Camera has no {0}x{1} mode — running at {2}x{3}",
+        ["osd.gestureOff"] = "gesture mode off",
+        ["gesture.playPause"] = "play / pause",
+        ["gesture.playing"] = "playing",
+        ["gesture.paused"] = "paused",
+        // {0} the step in seconds, {1} where it landed, {2} the whole file.
+        ["gesture.seekBack"] = "◀ {0} s   {1} / {2}",
+        ["gesture.seekForward"] = "{0} s ▶   {1} / {2}",
+        ["gesture.volumeAt"] = "volume {0}",
+        ["osd.fov"] = "field of view {0}°",
+        ["gesture.seekBack"] = "back 10 s",
+        ["gesture.seekForward"] = "forward 30 s",
+        ["gesture.volumeUp"] = "volume up",
+        ["gesture.volumeDown"] = "volume down",
+        ["gesture.fovNarrower"] = "narrower view",
+        ["gesture.fovWider"] = "wider view",
+        ["gesture.prevFile"] = "previous file",
+        ["gesture.nextFile"] = "next file",
+        ["gesture.none"] = "—",
         ["osd.gain"] = "gain  yaw {0}°  pitch {1}°",
         ["osd.decoder"] = "decoder: {0}",
         ["osd.decoderNeedsRenderer"] = "decoder: {0} needs the {1} renderer — switching to software",
@@ -269,6 +323,7 @@ public sealed class UiStrings
             "  Ctrl+Shift+R     recentre head position\n" +
             "  Ctrl+Shift+V     reset view\n" +
             "  Ctrl+Shift+H     head tracking on / off\n" +
+            "  Ctrl+Shift+W     gesture control on / off\n" +
             "  Ctrl+Shift+I     playback statistics\n" +
             "  Ctrl+Shift+B     next renderer (use if the picture is black)\n",
     };
@@ -359,13 +414,39 @@ public sealed class UiStrings
 
         ["menu.camera"] = "摄像头(&C)",
         ["cam.test"] = "摄像头测试...",
-        ["cam.busyBody"] =
-            "头部追踪正在使用摄像头，而摄像头同一时间只能被一个程序打开。" + Sep
-            + "请先关闭头部追踪，再试一次。",
+        ["cam.test.hint"] =
+            "打开一个窗口显示摄像头看到的画面 —— 人脸关键点、手部关键点，或两者，"
+            + "取决于你打开了哪些功能。诊断窗口打开期间头部追踪和手势控制会暂停，关闭后自动恢复。",
         ["cam.startFailedBody"] =
             "摄像头启动失败。" + Sep
             + "如果是缺少人脸检测模型，运行 tools\\install-models.bat。否则请检查摄像头"
             + "是否被其他程序占用，以及 Windows 设置 > 隐私 > 相机 是否允许访问。",
+
+        ["cam.resolution"] = "摄像头分辨率",
+        ["cam.resolution.hint"] =
+            "摄像头采集多少像素。坐得越远越重要:68 点模型是从整帧里把脸裁出来的,它的精度 —— "
+            + "也就是画面跟随头部的平滑程度 —— 直接取决于脸占了多少像素。分辨率越高每帧越贵,"
+            + "而且摄像头没有这个模式时会不声不响地给你最接近的一个。切换会重开摄像头。",
+        ["cam.res720"] = "1280 x 720  (720p)",
+        ["cam.res1080"] = "1920 x 1080  (1080p)",
+        ["cam.res1440"] = "2560 x 1440  (1440p)",
+        ["cam.res2160"] = "3840 x 2160  (2160p)",
+        ["cam.gestures"] = "手势控制",
+        ["cam.gestures.hint"] =
+            "让摄像头识别手势。张开手掌对着摄像头静止保持一秒进入手势模式，再保持一次退出。"
+            + "手势模式期间头部追踪会暂停。",
+        ["cam.gestureHelp"] = "手势说明...",
+        ["gestures.title"] = "手势控制",
+        ["gestures.body"] =
+            "张开手掌对着摄像头静止保持一秒，进入手势模式；再保持一次退出。"
+            + "下面这些手势只在手势模式内生效，且手势模式期间头部追踪会暂停。" + Sep
+            + "手势模式内：" + Sep
+            + "    握拳  —  播放 / 暂停\n"
+            + "    食指指左 / 指右  —  后退 10 秒 / 前进 30 秒\n"
+            + "    拇指朝上 / 朝下  —  音量增大 / 减小\n"
+            + "        VR 视频中：视野变窄 / 变宽\n"
+            + "    张开手掌向左 / 向右挥动  —  上一个 / 下一个文件" + Sep
+            + "每个手势需保持约四分之一秒。若画面中五秒没有手，手势模式会自动退出。",
 
         ["menu.view"] = "视图(&W)",
         ["view.fullscreen"] = "全屏",
@@ -421,6 +502,28 @@ public sealed class UiStrings
         ["osd.trackingOff"] = "头部追踪：关",
         ["osd.trackingLost"] = "头部追踪：信号丢失 —— 视角保持不动",
         ["osd.trackingBack"] = "头部追踪：信号恢复",
+        ["osd.gestureEnabled"] = "手势控制：开 — 张开手掌对着摄像头",
+        ["osd.gestureDisabled"] = "手势控制：关",
+        ["osd.gestureOn"] = "手势模式 — 头部追踪已暂停",
+        ["osd.gestureOnAlone"] = "手势模式已开启",
+        ["osd.cameraSizeDiffers"] = "摄像头没有 {0}x{1} 这个模式,实际运行在 {2}x{3}",
+        ["osd.gestureOff"] = "已退出手势模式",
+        ["gesture.playPause"] = "播放 / 暂停",
+        ["gesture.playing"] = "播放",
+        ["gesture.paused"] = "暂停",
+        ["gesture.seekBack"] = "◀ {0} 秒   {1} / {2}",
+        ["gesture.seekForward"] = "{0} 秒 ▶   {1} / {2}",
+        ["gesture.volumeAt"] = "音量 {0}",
+        ["osd.fov"] = "视野 {0}°",
+        ["gesture.seekBack"] = "后退 10 秒",
+        ["gesture.seekForward"] = "前进 30 秒",
+        ["gesture.volumeUp"] = "音量增大",
+        ["gesture.volumeDown"] = "音量减小",
+        ["gesture.fovNarrower"] = "视野变窄",
+        ["gesture.fovWider"] = "视野变宽",
+        ["gesture.prevFile"] = "上一个文件",
+        ["gesture.nextFile"] = "下一个文件",
+        ["gesture.none"] = "—",
         ["osd.gain"] = "灵敏度  水平 {0}°  垂直 {1}°",
         ["osd.decoder"] = "解码：{0}",
         ["osd.decoderNeedsRenderer"] = "解码：{0} 需要 {1} 渲染器 —— 已改用软解",
@@ -448,6 +551,7 @@ public sealed class UiStrings
             "  Ctrl+Shift+R    重设头部中心\n" +
             "  Ctrl+Shift+V    重置视角\n" +
             "  Ctrl+Shift+H    头部追踪开 / 关\n" +
+            "  Ctrl+Shift+W    手势控制开 / 关\n" +
             "  Ctrl+Shift+I    播放统计信息\n" +
             "  Ctrl+Shift+B    切换渲染器（画面全黑时用）\n",
     };
@@ -538,13 +642,39 @@ public sealed class UiStrings
 
         ["menu.camera"] = "攝影機(&C)",
         ["cam.test"] = "攝影機測試...",
-        ["cam.busyBody"] =
-            "頭部追蹤正在使用攝影機，而攝影機同一時間只能被一個程式開啟。" + Sep
-            + "請先關閉頭部追蹤，再試一次。",
+        ["cam.test.hint"] =
+            "開啟一個視窗顯示攝影機看到的畫面 —— 人臉關鍵點、手部關鍵點，或兩者，"
+            + "取決於你開啟了哪些功能。診斷視窗開啟期間頭部追蹤和手勢控制會暫停，關閉後自動恢復。",
         ["cam.startFailedBody"] =
             "攝影機啟動失敗。" + Sep
             + "如果是缺少人臉偵測模型，執行 tools\\install-models.bat。否則請檢查攝影機"
             + "是否被其他程式佔用，以及 Windows 設定 > 隱私權 > 相機 是否允許存取。",
+
+        ["cam.resolution"] = "攝影機解析度",
+        ["cam.resolution.hint"] =
+            "攝影機擷取多少像素。坐得越遠越重要:68 點模型是從整張畫面裡把臉裁出來的,它的精度 —— "
+            + "也就是畫面跟隨頭部的平滑程度 —— 直接取決於臉佔了多少像素。解析度越高每張越貴,"
+            + "而且攝影機沒有這個模式時會悄悄給你最接近的一個。切換會重開攝影機。",
+        ["cam.res720"] = "1280 x 720  (720p)",
+        ["cam.res1080"] = "1920 x 1080  (1080p)",
+        ["cam.res1440"] = "2560 x 1440  (1440p)",
+        ["cam.res2160"] = "3840 x 2160  (2160p)",
+        ["cam.gestures"] = "手勢控制",
+        ["cam.gestures.hint"] =
+            "讓攝影機辨識手勢。張開手掌對著攝影機靜止保持一秒進入手勢模式，再保持一次離開。"
+            + "手勢模式期間頭部追蹤會暫停。",
+        ["cam.gestureHelp"] = "手勢說明...",
+        ["gestures.title"] = "手勢控制",
+        ["gestures.body"] =
+            "張開手掌對著攝影機靜止保持一秒，進入手勢模式；再保持一次離開。"
+            + "下面這些手勢只在手勢模式內生效，且手勢模式期間頭部追蹤會暫停。" + Sep
+            + "手勢模式內：" + Sep
+            + "    握拳  —  播放 / 暫停\n"
+            + "    食指指左 / 指右  —  後退 10 秒 / 前進 30 秒\n"
+            + "    拇指朝上 / 朝下  —  音量增大 / 減小\n"
+            + "        VR 影片中：視野變窄 / 變寬\n"
+            + "    張開手掌向左 / 向右揮動  —  上一個 / 下一個檔案" + Sep
+            + "每個手勢需保持約四分之一秒。若畫面中五秒沒有手，手勢模式會自動離開。",
 
         ["menu.view"] = "檢視(&W)",
         ["view.fullscreen"] = "全螢幕",
@@ -600,6 +730,28 @@ public sealed class UiStrings
         ["osd.trackingOff"] = "頭部追蹤：關",
         ["osd.trackingLost"] = "頭部追蹤：訊號中斷 —— 視角保持不動",
         ["osd.trackingBack"] = "頭部追蹤：訊號恢復",
+        ["osd.gestureEnabled"] = "手勢控制：開 — 張開手掌對著攝影機",
+        ["osd.gestureDisabled"] = "手勢控制：關",
+        ["osd.gestureOn"] = "手勢模式 — 頭部追蹤已暫停",
+        ["osd.gestureOnAlone"] = "手勢模式已開啟",
+        ["osd.cameraSizeDiffers"] = "攝影機沒有 {0}x{1} 這個模式,實際執行於 {2}x{3}",
+        ["osd.gestureOff"] = "已離開手勢模式",
+        ["gesture.playPause"] = "播放 / 暫停",
+        ["gesture.playing"] = "播放",
+        ["gesture.paused"] = "暫停",
+        ["gesture.seekBack"] = "◀ {0} 秒   {1} / {2}",
+        ["gesture.seekForward"] = "{0} 秒 ▶   {1} / {2}",
+        ["gesture.volumeAt"] = "音量 {0}",
+        ["osd.fov"] = "視野 {0}°",
+        ["gesture.seekBack"] = "後退 10 秒",
+        ["gesture.seekForward"] = "前進 30 秒",
+        ["gesture.volumeUp"] = "音量增大",
+        ["gesture.volumeDown"] = "音量減小",
+        ["gesture.fovNarrower"] = "視野變窄",
+        ["gesture.fovWider"] = "視野變寬",
+        ["gesture.prevFile"] = "上一個檔案",
+        ["gesture.nextFile"] = "下一個檔案",
+        ["gesture.none"] = "—",
         ["osd.gain"] = "靈敏度  水平 {0}°  垂直 {1}°",
         ["osd.decoder"] = "解碼：{0}",
         ["osd.decoderNeedsRenderer"] = "解碼：{0} 需要 {1} 算繪器 —— 已改用軟解",
@@ -627,6 +779,7 @@ public sealed class UiStrings
             "  Ctrl+Shift+R    重設頭部中心\n" +
             "  Ctrl+Shift+V    重設視角\n" +
             "  Ctrl+Shift+H    頭部追蹤開 / 關\n" +
+            "  Ctrl+Shift+W    手勢控制開 / 關\n" +
             "  Ctrl+Shift+I    播放統計資訊\n" +
             "  Ctrl+Shift+B    切換算繪器（畫面全黑時用）\n",
     };
@@ -718,15 +871,45 @@ public sealed class UiStrings
 
         ["menu.camera"] = "カメラ(&C)",
         ["cam.test"] = "カメラをテスト...",
-        ["cam.busyBody"] =
-            "ヘッドトラッキングがカメラを使用中です。カメラは同時に一つのプログラムからしか"
-            + "開けません。" + Sep
-            + "ヘッドトラッキングをオフにしてから、もう一度お試しください。",
+        ["cam.test.hint"] =
+            "カメラが見ている映像を表示するウィンドウを開きます。顔のランドマーク、手の"
+            + "ランドマーク、またはその両方で、オンになっている機能によって変わります。"
+            + "開いているあいだヘッドトラッキングとジェスチャー操作は一時停止し、閉じると再開します。",
         ["cam.startFailedBody"] =
             "カメラを開始できませんでした。" + Sep
             + "顔検出モデルが無い場合は tools\\install-models.bat を実行してください。"
             + "それ以外の場合は、カメラが他のアプリに使われていないか、Windows の設定 > "
             + "プライバシー > カメラ でアクセスが許可されているかをご確認ください。",
+
+        ["cam.resolution"] = "カメラ解像度",
+        ["cam.resolution.hint"] =
+            "カメラが取り込む画素数です。離れて座っているほど効きます。68 点モデルは元サイズの"
+            + "フレームから顔を切り出すので、その精度 —— 視点が頭に追従するなめらかさ —— は顔が"
+            + "占める画素数で決まります。高いほど 1 フレームの負荷は増え、その解像度を持たない"
+            + "カメラは黙って近いものを返します。カメラを開き直します。",
+        ["cam.res720"] = "1280 x 720  (720p)",
+        ["cam.res1080"] = "1920 x 1080  (1080p)",
+        ["cam.res1440"] = "2560 x 1440  (1440p)",
+        ["cam.res2160"] = "3840 x 2160  (2160p)",
+        ["cam.gestures"] = "ジェスチャー操作",
+        ["cam.gestures.hint"] =
+            "カメラで手のジェスチャーを認識します。手のひらを開いてカメラの前で 1 秒静止すると"
+            + "ジェスチャーモードに入り、もう一度同じ動作で抜けます。"
+            + "ジェスチャーモード中はヘッドトラッキングが一時停止します。",
+        ["cam.gestureHelp"] = "ジェスチャー一覧...",
+        ["gestures.title"] = "手のジェスチャー",
+        ["gestures.body"] =
+            "手のひらを開いてカメラの前で 1 秒静止するとジェスチャーモードに入り、"
+            + "もう一度同じ動作で抜けます。以下はジェスチャーモード中のみ有効で、"
+            + "その間はヘッドトラッキングが一時停止します。" + Sep
+            + "ジェスチャーモード中：" + Sep
+            + "    握りこぶし  —  再生 / 一時停止\n"
+            + "    人差し指を左 / 右  —  10 秒戻す / 30 秒進める\n"
+            + "    親指を上 / 下  —  音量を上げる / 下げる\n"
+            + "        VR 動画では：視野を狭く / 広く\n"
+            + "    開いた手のひらを左 / 右へ振る  —  前 / 次のファイル" + Sep
+            + "各ジェスチャーは 0.25 秒ほど静止させてください。手が 5 秒間写らないと"
+            + "ジェスチャーモードは自動的に終了します。",
 
         ["menu.view"] = "表示(&W)",
         ["view.fullscreen"] = "全画面表示",
@@ -782,6 +965,28 @@ public sealed class UiStrings
         ["osd.trackingOff"] = "ヘッドトラッキング：オフ",
         ["osd.trackingLost"] = "ヘッドトラッキング：信号が途絶えました —— 視点を保持します",
         ["osd.trackingBack"] = "ヘッドトラッキング：信号が回復しました",
+        ["osd.gestureEnabled"] = "ジェスチャー操作：オン — 手のひらをカメラへ",
+        ["osd.gestureDisabled"] = "ジェスチャー操作：オフ",
+        ["osd.gestureOn"] = "ジェスチャーモード — ヘッドトラッキング一時停止",
+        ["osd.gestureOnAlone"] = "ジェスチャーモード",
+        ["osd.cameraSizeDiffers"] = "カメラに {0}x{1} はありません。{2}x{3} で動作中",
+        ["osd.gestureOff"] = "ジェスチャーモード終了",
+        ["gesture.playPause"] = "再生 / 一時停止",
+        ["gesture.playing"] = "再生",
+        ["gesture.paused"] = "一時停止",
+        ["gesture.seekBack"] = "◀ {0} 秒   {1} / {2}",
+        ["gesture.seekForward"] = "{0} 秒 ▶   {1} / {2}",
+        ["gesture.volumeAt"] = "音量 {0}",
+        ["osd.fov"] = "視野 {0}°",
+        ["gesture.seekBack"] = "10 秒戻す",
+        ["gesture.seekForward"] = "30 秒進める",
+        ["gesture.volumeUp"] = "音量を上げる",
+        ["gesture.volumeDown"] = "音量を下げる",
+        ["gesture.fovNarrower"] = "視野を狭く",
+        ["gesture.fovWider"] = "視野を広く",
+        ["gesture.prevFile"] = "前のファイル",
+        ["gesture.nextFile"] = "次のファイル",
+        ["gesture.none"] = "—",
         ["osd.gain"] = "感度  水平 {0}°  垂直 {1}°",
         ["osd.decoder"] = "デコード：{0}",
         ["osd.decoderNeedsRenderer"] = "デコード：{0} には {1} レンダラーが必要です —— ソフトウェアに切り替えます",
@@ -809,6 +1014,7 @@ public sealed class UiStrings
             "  Ctrl+Shift+R     頭の中心を設定し直す\n" +
             "  Ctrl+Shift+V     視点をリセット\n" +
             "  Ctrl+Shift+H     ヘッドトラッキングのオン / オフ\n" +
+            "  Ctrl+Shift+W     ジェスチャー操作のオン / オフ\n" +
             "  Ctrl+Shift+I     再生統計情報\n" +
             "  Ctrl+Shift+B     次のレンダラー（映像が真っ黒なときに）\n",
     };
@@ -900,15 +1106,45 @@ public sealed class UiStrings
 
         ["menu.camera"] = "카메라(&C)",
         ["cam.test"] = "카메라 테스트...",
-        ["cam.busyBody"] =
-            "헤드 트래킹이 카메라를 사용 중입니다. 카메라는 한 번에 하나의 프로그램만 열 수 "
-            + "있습니다." + Sep
-            + "헤드 트래킹을 끈 뒤 다시 시도하세요.",
+        ["cam.test.hint"] =
+            "카메라가 보는 화면을 표시하는 창을 엽니다. 얼굴 랜드마크, 손 랜드마크, 또는 "
+            + "둘 다이며 켜져 있는 기능에 따라 달라집니다. 창이 열려 있는 동안 머리 추적과 "
+            + "제스처 제어는 일시 중지되고, 닫으면 다시 시작됩니다.",
         ["cam.startFailedBody"] =
             "카메라를 시작하지 못했습니다." + Sep
             + "얼굴 검출 모델이 없다면 tools\\install-models.bat 을 실행하세요. 그렇지 "
             + "않다면 다른 프로그램이 카메라를 쓰고 있지 않은지, Windows 설정 > 개인 정보 > "
             + "카메라 에서 접근이 허용되어 있는지 확인하세요.",
+
+        ["cam.resolution"] = "카메라 해상도",
+        ["cam.resolution.hint"] =
+            "카메라가 담는 화소 수입니다. 멀리 앉을수록 중요합니다. 68점 모델은 원본 크기 화면에서 "
+            + "얼굴을 잘라내므로, 그 정밀도 —— 시야가 머리를 따라오는 부드러움 —— 은 얼굴이 차지하는 "
+            + "화소 수에 달려 있습니다. 높을수록 프레임당 비용이 늘고, 해당 모드가 없는 카메라는 "
+            + "조용히 가장 가까운 것을 돌려줍니다. 카메라를 다시 엽니다.",
+        ["cam.res720"] = "1280 x 720  (720p)",
+        ["cam.res1080"] = "1920 x 1080  (1080p)",
+        ["cam.res1440"] = "2560 x 1440  (1440p)",
+        ["cam.res2160"] = "3840 x 2160  (2160p)",
+        ["cam.gestures"] = "제스처 제어",
+        ["cam.gestures.hint"] =
+            "카메라로 손 제스처를 인식합니다. 손바닥을 펴고 카메라 앞에서 1초간 멈추면 "
+            + "제스처 모드로 들어가고, 다시 하면 나옵니다. "
+            + "제스처 모드 중에는 헤드 트래킹이 일시 중지됩니다.",
+        ["cam.gestureHelp"] = "제스처 안내...",
+        ["gestures.title"] = "손 제스처",
+        ["gestures.body"] =
+            "손바닥을 펴고 카메라 앞에서 1초간 멈추면 제스처 모드로 들어가고, "
+            + "다시 하면 나옵니다. 아래 동작은 제스처 모드 안에서만 작동하며, "
+            + "그동안 헤드 트래킹은 일시 중지됩니다." + Sep
+            + "제스처 모드 안에서:" + Sep
+            + "    주먹  —  재생 / 일시정지\n"
+            + "    검지로 왼쪽 / 오른쪽  —  10초 뒤로 / 30초 앞으로\n"
+            + "    엄지 위 / 아래  —  볼륨 올리기 / 내리기\n"
+            + "        VR 영상에서는: 시야 좁게 / 넓게\n"
+            + "    편 손바닥을 왼쪽 / 오른쪽으로 휘두르기  —  이전 / 다음 파일" + Sep
+            + "각 동작은 0.25초 정도 유지하세요. 손이 5초간 보이지 않으면 제스처 모드는 "
+            + "자동으로 끝납니다.",
 
         ["menu.view"] = "보기(&W)",
         ["view.fullscreen"] = "전체 화면",
@@ -964,6 +1200,28 @@ public sealed class UiStrings
         ["osd.trackingOff"] = "헤드 트래킹: 끔",
         ["osd.trackingLost"] = "헤드 트래킹: 신호가 끊겼습니다 —— 시점을 유지합니다",
         ["osd.trackingBack"] = "헤드 트래킹: 신호가 복구되었습니다",
+        ["osd.gestureEnabled"] = "제스처 제어: 켬 — 펼친 손바닥을 카메라에",
+        ["osd.gestureDisabled"] = "제스처 제어: 끔",
+        ["osd.gestureOn"] = "제스처 모드 — 헤드 트래킹 일시 중지",
+        ["osd.gestureOnAlone"] = "제스처 모드",
+        ["osd.cameraSizeDiffers"] = "카메라에 {0}x{1} 모드가 없어 {2}x{3} 로 동작합니다",
+        ["osd.gestureOff"] = "제스처 모드 종료",
+        ["gesture.playPause"] = "재생 / 일시정지",
+        ["gesture.playing"] = "재생",
+        ["gesture.paused"] = "일시정지",
+        ["gesture.seekBack"] = "◀ {0}초   {1} / {2}",
+        ["gesture.seekForward"] = "{0}초 ▶   {1} / {2}",
+        ["gesture.volumeAt"] = "볼륨 {0}",
+        ["osd.fov"] = "시야 {0}°",
+        ["gesture.seekBack"] = "10초 뒤로",
+        ["gesture.seekForward"] = "30초 앞으로",
+        ["gesture.volumeUp"] = "볼륨 올리기",
+        ["gesture.volumeDown"] = "볼륨 내리기",
+        ["gesture.fovNarrower"] = "시야 좁게",
+        ["gesture.fovWider"] = "시야 넓게",
+        ["gesture.prevFile"] = "이전 파일",
+        ["gesture.nextFile"] = "다음 파일",
+        ["gesture.none"] = "—",
         ["osd.gain"] = "감도  수평 {0}°  수직 {1}°",
         ["osd.decoder"] = "디코딩: {0}",
         ["osd.decoderNeedsRenderer"] = "디코딩: {0}에는 {1} 렌더러가 필요합니다 —— 소프트웨어로 전환합니다",
@@ -991,6 +1249,7 @@ public sealed class UiStrings
             "  Ctrl+Shift+R     머리 중심 재설정\n" +
             "  Ctrl+Shift+V     시점 초기화\n" +
             "  Ctrl+Shift+H     헤드 트래킹 켜기 / 끄기\n" +
+            "  Ctrl+Shift+W     제스처 제어 켜기 / 끄기\n" +
             "  Ctrl+Shift+I     재생 통계\n" +
             "  Ctrl+Shift+B     다음 렌더러(화면이 검을 때)\n",
     };

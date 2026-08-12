@@ -5,9 +5,10 @@
 <img src="assets/icon-256.png" width="128" alt="VR 视频平面播放器">
 
 在**普通显示器**上舒服地观看 **180° / 360° VR 视频**的桌面播放器,支持本地 8K。
-可选用普通摄像头追踪头部动作,自动转动视角。
+可选用普通摄像头做两件事:跟着头部动作转动视角,以及用手势控制播放、快进快退、音量和
+切换文件。两者默认都关闭。
 
-版本 0.3,仅支持 Windows。
+版本 0.4,仅支持 Windows。
 
 ![VR 视频平面播放器](assets/screen/screen_zh-CN.png)
 
@@ -49,6 +50,8 @@
 - **摄像头头部追踪**,默认关闭。YuNet 找脸,68 点模型定位,PnP 解算出头部姿态。
   无需标记点、无需额外硬件、无需安装 opentrack —— 但如果你已经在用 opentrack,
   UDP 输入依然支持。
+- **摄像头手势控制**,默认关闭。张开手掌对着摄像头静止保持一秒进入手势模式,之后握拳可播放/暂停,食指可快退快进,拇指可调音量,张开手掌左右挥动可切换文件。
+  手势模式之外一律不响应;手势模式期间头部追踪会暂停。
 - **鼠标拖动转视角**、键盘转视角、滚轮缩放。
 - **原生菜单栏**(不是画面上的浮层),支持英文、简繁中文、日文、韩文,跟随系统语言。
 
@@ -73,7 +76,7 @@ git clone <本仓库>
 cd VRHeadTrackingPlayer
 
 tools\install-mpv360.bat      # mpv360 着色器、uosc、字体
-tools\install-models.bat      # 两个 ONNX 模型
+tools\install-models.bat      # 四个 ONNX 模型
 
 dotnet run --project tests/VideoFormatTests/VideoFormatTests.csproj -c Release
 powershell -ExecutionPolicy Bypass -File tools/publish.ps1
@@ -86,15 +89,19 @@ powershell -ExecutionPolicy Bypass -File tools/publish.ps1
 
 ### ONNX 模型不在本仓库里
 
-头部追踪需要两个模型,合计约 14 MB。**没有提交进仓库** —— 二进制不该进源码历史,
-而且两者都在别处发布、各有各的许可证。`tools\install-models.bat` 会把它们下载到 `models\`:
+头部追踪和手势控制一共需要四个模型,合计约 21 MB。**没有提交进仓库** —— 二进制不该进
+源码历史,而且四个都在别处发布、各有各的许可证。`tools\install-models.bat` 会把它们
+下载到 `models\`:
 
-| 文件 | 模型 | 来源 | 许可证 |
-| --- | --- | --- | --- |
-| `face_detection_yunet.onnx` | YuNet | [opencv/opencv_zoo](https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx) | MIT |
-| `face_landmark_peppa_wutz.onnx` | peppa_wutz 68 点 | [facefusion/facefusion-assets](https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/peppa_wutz.onnx) | MIT |
+| 文件 | 模型 | 用于 | 来源 | 许可证 |
+| --- | --- | --- | --- | --- |
+| `face_detection_yunet.onnx` | YuNet | 头部 | [opencv/opencv_zoo](https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx) | MIT |
+| `face_landmark_peppa_wutz.onnx` | peppa_wutz 68 点 | 头部 | [facefusion/facefusion-assets](https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/peppa_wutz.onnx) | MIT |
+| `palm_detection_mediapipe.onnx` | MediaPipe BlazePalm | 手部 | [opencv/opencv_zoo](https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/palm_detection_mediapipe/palm_detection_mediapipe_2023feb.onnx) | Apache 2.0 |
+| `handpose_estimation_mediapipe.onnx` | MediaPipe 21 点手部关键点 | 手部 | [opencv/opencv_zoo](https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/handpose_estimation_mediapipe/handpose_estimation_mediapipe_2023feb.onnx) | Apache 2.0 |
 
-没有它们播放器照常工作,只是用不了头部追踪。
+没有它们播放器照常工作,只是用不了头部追踪和手势控制。两者互不依赖,只装一对也能用
+对应的那个功能。
 
 ### mpv 同样不在仓库里
 
@@ -124,11 +131,48 @@ mpv 是独立的 GPL 程序,**以独立进程的形式随发布包分发,不是�
 | `1` / `2` | 降低 / 提高对比度 |
 | `Ctrl+Shift+V` | 视角复位(不改变头部参考) |
 | `Ctrl+Shift+H` | 开关头部追踪 |
+| `Ctrl+Shift+W` | 开关手势控制 |
 | `Ctrl+[` / `Ctrl+]` | 追踪增益 − / + |
 | `Ctrl+Shift+I` | 播放统计 |
 | `F` | 全屏 |
 
 mpv 原有的按键(空格、方向键、音量)照常可用。
+
+## 手势控制
+
+默认关闭。在**摄像头 ▸ 手势控制**里打开,或按 `Ctrl+Shift+W`。打开只是让摄像头开始
+看 —— 在进入手势模式之前,任何手势都不会触发动作。
+
+**张开手掌对着摄像头静止保持一秒**进入手势模式,再保持一次退出。手势模式期间
+**头部追踪会暂停**:挥手的时候头也在动,画面跟着乱转比没有视角控制更难受。
+角落里的人脸图标会变成琥珀色表示这一点。
+
+| 手势 | 普通视频 | VR 视频 |
+| --- | --- | --- |
+| 握拳 | 播放 / 暂停 | 播放 / 暂停 |
+| 食指指左 / 指右 | 后退 10 秒 / 前进 10 秒 | 后退 10 秒 / 前进 10 秒 |
+| 拇指朝上 / 朝下 | 音量增大 / 减小 | 视野变窄 / 变宽 |
+| 张开手掌向左 / 向右挥动 | 上一个 / 下一个文件 | 上一个 / 下一个文件 |
+
+手势模式打开期间,这张表会常驻在画面右侧,每种手势一行。
+
+每个手势保持约四分之一秒。拇指和食指长按会连发(音量、视野、快进快退都是调节量);
+播放/暂停和切换文件只触发一次,手必须先离开该姿态才能再次触发。快进快退的连发比另外
+两个慢:它一步是十秒片长,而不是五格音量,同样的节奏会直接冲过你想找的位置。
+画面中五秒没有手时,手势模式也会自动退出。
+
+挥动需要**从静止开始**,横向走过一个掌宽,并在一秒内完成。从静止开始是为了让缓慢漂移
+的手不会误切文件,同时它也是两次切换之间的停顿:手收回来、停一下,就可以再挥一次。
+
+手势控制打开后,只要手进入画面,**右下角会出现一个小面板**,画出摄像头读到的 21 个
+关键点,以及手掌保持的进度条。头部追踪有画面本身作为反馈——转头画面就动,不动你立刻
+知道;手势在触发之前屏幕上什么都不变,于是"姿态没被识别""手不在画面里""摄像头根本
+没开"三种情况长得一模一样。这个面板就是用来把它们分开的。左上角还有两条提示:手快
+碰到画面边缘时提醒一次,以及摄像头开了很久始终没找到过手时提醒一次(通常是摄像头
+角度太高,或者房间太暗)。
+
+完整诊断用 `VRFlatPlayer --gesture-preview`:同样的关键点,外加判出的姿态和每根手指
+被判成伸直还是弯曲。手势死活不生效时,最后这一项就是原因所在。
 
 ## 配置
 
@@ -146,7 +190,13 @@ mpv 原有的按键(空格、方向键、音量)照常可用。
 | `filter.glideMaxSeconds` | 0.30 | 姿态来得慢时，滑行时间最多拉到多长。慢机器上画面看起来是平滑移动还是一顿一顿，就取决于它；设成和 `glideSeconds` 相等即恢复固定滑行 |
 | `source.camera.landmarkFps` | 30 | 关键点模型每秒最多跑几次 |
 | `source.camera.detectWidth` | 640 | 人脸检测器看到的画面宽度；0 表示用整帧。比 1280 便宜五倍，框一样够用 |
+| `source.camera.detectFps` | 2 | 跟踪到人脸后，人脸检测器每秒重跑几次。检测器回答的是“脸在哪”，帧与帧之间几乎不变；68 点模型才是必须每帧跑的那个。比 `detectWidth` 优先调这个 —— 它不会让检测器看得更少 |
+| `source.camera.width` / `height` | 1280 / 720 | 采集分辨率，菜单里也有：**摄像头 ▸ 摄像头分辨率**。脸上像素越多，姿态噪声越小——坐得远时这一项最重要；但它**不会**让人脸检测变好，因为 `detectWidth` 卡住了检测器能看到的尺寸。摄像头没有你选的模式时会不声不响地给最接近的一个，日志里会写明 |
 | `source.camera.trackingCpuShare` | 0.75 | 整条追踪流水线允许占用的时间比例。调低省 CPU —— 但画面跟上头部动作的延迟会按同样倍数变大 |
+| `source.camera.gesture.idleFps` | 3 | 手势模式关闭时多久看一次手。这就是手势控制在你不用它的时候的开销(本机约 5% 单核),要省 CPU 先动它 |
+| `source.camera.gesture.toggleSeconds` | 1.0 | 张开手掌需静止保持多久才进入/退出手势模式 |
+| `source.camera.gesture.swipeTravelPalms` | 1.0 | 挥动需要走多远,单位是掌宽而不是像素,所以远近都一样。日志会打印你的手实际走到了多少 |
+| `source.camera.gesture.seekRepeatSeconds` | 0.8 | 长按快进快退的连发间隔。和 `repeatSeconds` 分开,因为它一步走得远得多 |
 
 窗口位置、每个文件的 VR 模式、运行日志分别存在
 `window-state.json`、`mode-memory.json`、`mpv-last-run.log` 里 ——

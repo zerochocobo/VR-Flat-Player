@@ -1,3 +1,5 @@
+using OpenCvSharp;
+
 namespace HeadTrackBridge.Tracking.Face;
 
 /// <summary>
@@ -188,5 +190,59 @@ public static class FaceGeometry
         return new FaceLandmarks(
             p[0, 0], p[0, 1], p[1, 0], p[1, 1], p[2, 0], p[2, 1],
             p[3, 0], p[3, 1], p[4, 0], p[4, 1]);
+    }
+
+    /// <summary>
+    /// Whether a set of 68 landmarks still sits properly inside the box they were
+    /// found from, so that box can be used again on the next frame.
+    /// </summary>
+    /// <remarks>
+    /// Two ways for it to stop fitting, and both have to be caught because they
+    /// happen at different moments. Sideways: the head moves across the frame and
+    /// the face drifts toward the edge of the crop, where the model has less and
+    /// less of it to work with. Depth: the head comes closer or goes further and
+    /// the face no longer fills the box it was measured in, which changes the
+    /// scale the model sees.
+    ///
+    /// The numbers come from the crop geometry rather than from taste.
+    /// <c>FaceLandmarker.Locate</c> takes a square of 1.6 times the longer side of
+    /// the box, so there is 0.3 of a side of margin on each edge. Allowing a
+    /// quarter of that leaves the face comfortably inside a crop that still looks
+    /// like the ones the model was trained on. The scale window is wider, 0.75 to
+    /// 1.35, because a face box and the bounding box of 68 landmarks are not the
+    /// same rectangle to begin with — the landmarks stop at the eyebrows and the
+    /// detector's box does not — so a constant offset between them is expected
+    /// and only a change in it is interesting.
+    ///
+    /// The failure it does not catch: a face that leaves the room entirely. The
+    /// landmarker will return 68 points from whatever is in the crop, and they
+    /// may well pass both tests, so a pose keeps being produced from furniture
+    /// until <see cref="CameraConfig.DetectFps"/> next brings the detector back.
+    /// That is the ceiling on how wrong this can be, and it is why that setting
+    /// is a rate rather than "only when the landmarks say so".
+    ///
+    /// Here rather than in CameraFaceSource because this is where the geometry
+    /// the tests can reach lives; the loop that calls it needs a camera and a
+    /// moving head and cannot be tested at all.
+    /// </remarks>
+    public static bool StillFits(Point2f[] dense, Rect box)
+    {
+        float minX = float.MaxValue, minY = float.MaxValue;
+        float maxX = float.MinValue, maxY = float.MinValue;
+        foreach (var p in dense)
+        {
+            minX = Math.Min(minX, p.X); maxX = Math.Max(maxX, p.X);
+            minY = Math.Min(minY, p.Y); maxY = Math.Max(maxY, p.Y);
+        }
+
+        var side = Math.Max(box.Width, box.Height);
+        if (side <= 0) return false;
+
+        var driftX = Math.Abs((minX + maxX) / 2 - (box.X + box.Width / 2f));
+        var driftY = Math.Abs((minY + maxY) / 2 - (box.Y + box.Height / 2f));
+        if (Math.Max(driftX, driftY) > side * 0.15f) return false;
+
+        var scale = Math.Max(maxX - minX, maxY - minY) / side;
+        return scale is > 0.75f and < 1.35f;
     }
 }

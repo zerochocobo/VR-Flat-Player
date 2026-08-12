@@ -5,10 +5,11 @@
 <img src="assets/icon-256.png" width="128" alt="VR Flat Player">
 
 **180° / 360° の VR 動画を、普通のフラットモニターで**快適に見るためのデスクトップ
-プレイヤーです。ローカルの 8K にも対応します。市販のウェブカメラで頭の動きを追い、
-視点を自動で動かすこともできます。
+プレイヤーです。ローカルの 8K にも対応します。市販のウェブカメラで、頭の動きに合わせて
+視点を動かすことも、手のジェスチャーで再生・シーク・音量・ファイル切り替えを操作する
+こともできます。どちらも既定はオフです。
 
-バージョン 0.3、Windows 専用。
+バージョン 0.4、Windows 専用。
 
 ![VR Flat Player](assets/screen/screen_ja.png)
 
@@ -49,6 +50,10 @@
   68 点のランドマーカーが位置を求め、PnP が頭部姿勢に変換します。マーカーも
   追加機材も opentrack のインストールも不要です。すでに opentrack を使っているなら
   UDP 入力もそのまま使えます。
+- **手のジェスチャー操作**、既定はオフ。手のひらを開いてカメラの前で 1 秒静止すると
+  ジェスチャーモードに入り、握りこぶしで再生/一時停止、人差し指でシーク、親指で音量、
+  開いた手のひらを横に振るとファイル切り替えです。ジェスチャーモードの外では何も
+  反応せず、モード中はヘッドトラッキングが一時停止します。
 - **ドラッグで視点移動**、キーボードでの視点移動、ホイールでズーム。
 - **ネイティブのメニューバー**(映像に重ねるオーバーレイではありません)。英語・
   簡体字・繁体字・日本語・韓国語に対応し、OS の言語に従います。
@@ -76,7 +81,7 @@ git clone <このリポジトリ>
 cd VRHeadTrackingPlayer
 
 tools\install-mpv360.bat      # mpv360 シェーダー、uosc、フォント
-tools\install-models.bat      # 2 つの ONNX モデル
+tools\install-models.bat      # 4 つの ONNX モデル
 
 dotnet run --project tests/VideoFormatTests/VideoFormatTests.csproj -c Release
 powershell -ExecutionPolicy Bypass -File tools/publish.ps1
@@ -90,16 +95,20 @@ mpv.exe が必要で、インストール済みのものを探すか `-MpvExe <�
 
 ### ONNX モデルはこのリポジトリに含まれていません
 
-頭部トラッキングには 2 つのモデル(合計約 14 MB)が必要です。**コミットしていません** —
-バイナリをソース履歴に入れるべきではなく、どちらも別の場所で各自のライセンスのもとに
-公開されているためです。`tools\install-models.bat` が `models\` へ取得します。
+頭部トラッキングとジェスチャー操作には合わせて 4 つのモデル(合計約 21 MB)が必要です。
+**コミットしていません** — バイナリをソース履歴に入れるべきではなく、4 つとも別の場所で
+各自のライセンスのもとに公開されているためです。`tools\install-models.bat` が
+`models\` へ取得します。
 
-| ファイル | モデル | 取得元 | ライセンス |
-| --- | --- | --- | --- |
-| `face_detection_yunet.onnx` | YuNet | [opencv/opencv_zoo](https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx) | MIT |
-| `face_landmark_peppa_wutz.onnx` | peppa_wutz 68 点 | [facefusion/facefusion-assets](https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/peppa_wutz.onnx) | MIT |
+| ファイル | モデル | 用途 | 取得元 | ライセンス |
+| --- | --- | --- | --- | --- |
+| `face_detection_yunet.onnx` | YuNet | 頭部 | [opencv/opencv_zoo](https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx) | MIT |
+| `face_landmark_peppa_wutz.onnx` | peppa_wutz 68 点 | 頭部 | [facefusion/facefusion-assets](https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/peppa_wutz.onnx) | MIT |
+| `palm_detection_mediapipe.onnx` | MediaPipe BlazePalm | 手 | [opencv/opencv_zoo](https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/palm_detection_mediapipe/palm_detection_mediapipe_2023feb.onnx) | Apache 2.0 |
+| `handpose_estimation_mediapipe.onnx` | MediaPipe 手の 21 点 | 手 | [opencv/opencv_zoo](https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/handpose_estimation_mediapipe/handpose_estimation_mediapipe_2023feb.onnx) | Apache 2.0 |
 
-なくてもプレイヤーは動作します。頭部トラッキングだけが使えません。
+なくてもプレイヤーは動作します。頭部トラッキングとジェスチャー操作だけが使えません。
+2 つの機能は独立しているので、片方のペアだけでもその機能は使えます。
 
 ### mpv も含まれていません
 
@@ -130,11 +139,55 @@ mpv は独立した GPL のプログラムで、リンクするのではなく**
 | `1` / `2` | コントラストを下げる / 上げる |
 | `Ctrl+Shift+V` | 頭の基準を変えずに視点だけリセット |
 | `Ctrl+Shift+H` | 頭部トラッキングの切り替え |
+| `Ctrl+Shift+W` | ジェスチャー操作の切り替え |
 | `Ctrl+[` / `Ctrl+]` | トラッキングのゲイン − / + |
 | `Ctrl+Shift+I` | 再生統計 |
 | `F` | 全画面 |
 
 mpv 本来のキー(スペース、方向キー、音量)もそのまま使えます。
+
+## 手のジェスチャー
+
+既定はオフです。**カメラ ▸ ジェスチャー操作**、または `Ctrl+Shift+W` で有効にします。
+有効にしてもカメラが見はじめるだけで、ジェスチャーモードに入るまで何も動きません。
+
+**手のひらを開いてカメラの前で 1 秒静止**するとジェスチャーモードに入り、もう一度
+同じ動作で抜けます。モード中は**ヘッドトラッキングが一時停止**します。手を振れば頭も
+動くので、そのあいだ画面が振り回されるくらいなら視点制御はない方がましだからです。
+隅の顔アイコンが琥珀色になって、それを示します。
+
+| ジェスチャー | 通常の動画 | VR 動画 |
+| --- | --- | --- |
+| 握りこぶし | 再生 / 一時停止 | 再生 / 一時停止 |
+| 人差し指を左 / 右 | 10 秒戻す / 10 秒進める | 10 秒戻す / 10 秒進める |
+| 親指を上 / 下 | 音量を上げる / 下げる | 視野を狭く / 広く |
+| 開いた手のひらを左 / 右へ振る | 前 / 次のファイル | 前 / 次のファイル |
+
+この一覧は、ジェスチャーモードの間ずっと画面右側に 1 行ずつ表示されます。
+
+各ジェスチャーは 0.25 秒ほど静止させます。親指と人差し指は出したままで連続して効きます
+(音量・視野・シークはいずれも調整量です)。再生/一時停止とファイル切り替えは 1 回だけ
+効いて、もう一度出すには一度その形をやめる必要があります。シークの連続だけは他より
+ゆっくりです。1 回が 5 段階の音量ではなく 10 秒の映像なので、同じ速さでは狙った場所を
+通り過ぎてしまいます。
+手が 5 秒間写らないとジェスチャーモードは自動的に終了します。
+
+振る動作は**静止した状態から始めて**、手のひら 1 個分を横に動かし、1 秒以内に終える
+必要があります。静止から始める決まりは、ゆっくり流れる手が勝手にファイルを切り替えて
+しまうのを防ぐためで、同時に次の切り替えまでの間合いにもなります。手を戻し、一度止めて、
+また振ってください。
+
+ジェスチャー操作が有効なあいだ、手が写ると**右下に小さなパネル**が出て、カメラが読んだ
+21 個のランドマークと、手のひら静止の進み具合を示すバーが表示されます。ヘッドトラッキング
+には映像そのものという手応えがありますが、ジェスチャーは何か起きるまで画面が変わらず、
+「ポーズが認識されない」「手が画面の外にある」「カメラが開いていない」が見分けられません。
+このパネルはそれを分けるためのものです。左上にはさらに 2 つの注意が出ます。手が画面の端に
+近づいたときと、しばらく見ていて一度も手が見つからないとき(たいていはカメラの向きが高すぎるか、
+部屋が暗すぎます)です。
+
+`VRFlatPlayer --gesture-preview` で 21 個のランドマーク、読み取られたポーズ、そして
+どの指が伸びていると判定されたかを表示できます。ジェスチャーが効かないときは、
+最後のそれが理由を教えてくれます。
 
 ## 設定
 
@@ -153,7 +206,13 @@ mpv 本来のキー(スペース、方向キー、音量)もそのまま使え�
 | `filter.glideMaxSeconds` | 0.30 | ポーズの間隔が広いときにグライドを伸ばせる上限。遅いマシンで滑らかに動くか階段状になるかはこれで決まる。`glideSeconds` と同じ値にすれば固定グライドに戻る |
 | `source.camera.landmarkFps` | 30 | ランドマーカーの毎秒実行回数の上限 |
 | `source.camera.detectWidth` | 640 | 顔検出器に渡す横幅。0 でフレーム全体。1280 の 5 分の 1 のコストで、枠の使い勝手は変わらない |
+| `source.camera.detectFps` | 2 | 顔を追跡中に顔検出器を再実行する頻度（Hz）。検出器の答えはフレーム間でほとんど変わりません。毎フレーム必要なのは 68 点モデルの方です。`detectWidth` より先にこちらを |
+| `source.camera.width` / `height` | 1280 / 720 | 撮影解像度。**カメラ ▸ カメラ解像度**でも変えられます。顔の画素が多いほど姿勢のノイズが減りますが、`detectWidth` が検出器の見る大きさを押さえるので検出自体は良くなりません |
 | `source.camera.trackingCpuShare` | 0.75 | トラッキング全体が使ってよい時間の割合。下げれば CPU は減るが、頭の動きに映像が追従するまでの遅れが同じ倍率で増える |
+| `source.camera.gesture.idleFps` | 3 | ジェスチャーモードでないときに手を見る頻度。使っていないあいだのコストそのもので(本機で約 5%/コア)、まず下げるならここ |
+| `source.camera.gesture.toggleSeconds` | 1.0 | ジェスチャーモードの出入りに手のひらを静止させる秒数 |
+| `source.camera.gesture.swipeTravelPalms` | 1.0 | 振る動作に必要な移動量。ピクセルではなく手のひら幅なので距離が変わっても同じ。実際にどこまで届いたかはログに出ます |
+| `source.camera.gesture.seekRepeatSeconds` | 0.8 | シークを出したままにしたときの繰り返し間隔。1 回の幅が大きいので `repeatSeconds` とは別 |
 
 ウィンドウの位置、ファイルごとの VR モード、実行ログはそれぞれ
 `window-state.json`、`mode-memory.json`、`mpv-last-run.log` に分けてあります。

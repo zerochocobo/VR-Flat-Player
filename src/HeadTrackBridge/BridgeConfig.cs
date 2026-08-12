@@ -134,8 +134,40 @@ public sealed class CameraConfig
     /// 320 is cheaper again, and left as an option rather than the default:
     /// there is no measurement here of what it does to detection *quality* on a
     /// real face, and a missed face costs far more than 17 ms.
+    ///
+    /// Reported since, and worth recording as the reason not to reach for it
+    /// first: someone sitting well back from a 2K camera has a face only a few
+    /// dozen pixels across before any of this, and halving them turns a slow
+    /// tracker into one that finds nothing. Their log showed windows at 32% and
+    /// 54% found at 640. <see cref="DetectFps"/> buys the same milliseconds
+    /// without touching what the detector can see, and is the setting to try
+    /// first; this one is for people whose face fills the frame.
     /// </summary>
     public int DetectWidth { get; set; } = 640;
+
+    /// <summary>
+    /// How often the face detector re-runs while the landmarker is following a
+    /// face, in Hz.
+    ///
+    /// The detector answers "where is the face", and that answer barely changes
+    /// between two frames a tenth of a second apart. The 68-point landmarker is
+    /// the one that has to run every frame, because it is the measurement. Until
+    /// this existed the detector ran every frame too, at 44 ms against the
+    /// landmarker's 88 in a reported session — a third of the loop spent
+    /// re-deriving something already known.
+    ///
+    /// This is only the backstop. The landmarks themselves say when the box has
+    /// gone stale — the face drifting toward the edge of the crop, or changing
+    /// size in it — and the detector is called back immediately when they do, so
+    /// a head that moves gets a fresh box on the next frame rather than at the
+    /// next tick of this. Two a second is therefore about "how long may a
+    /// perfectly still head keep an old box", where the answer hardly matters.
+    ///
+    /// 0 restores the old behaviour of detecting on every frame. It is also what
+    /// happens with no landmarker present, where the detector's five points are
+    /// the pose and reusing them would freeze the view.
+    /// </summary>
+    public double DetectFps { get; set; } = 2;
 
     /// <summary>
     /// Flip horizontally. On by default: a camera facing you produces a
@@ -234,6 +266,236 @@ public sealed class CameraConfig
     /// buys back is responsiveness, directly and proportionally.
     /// </summary>
     public double TrackingCpuShare { get; set; } = 0.75;
+
+    /// <summary>Hand gesture control. Off unless <see cref="UiConfig.GestureControl"/> is set.</summary>
+    public GestureConfig Gesture { get; set; } = new();
+}
+
+/// <summary>
+/// Hand gesture control: what it costs and how eager it is.
+/// </summary>
+/// <remarks>
+/// Almost every threshold here is a starting point rather than a measurement,
+/// and that is worth saying plainly at the top rather than repeating on each
+/// one. This machine has no usable camera — the device opens and returns green
+/// frames — so nothing below has been checked against a real hand. What has been
+/// measured is the cost of the two models, which is where the rates come from,
+/// and the geometry, which the unit tests cover.
+///
+/// <c>--gesture-preview</c> exists so the numbers can be checked on a machine
+/// that does have a camera: it draws the landmarks, the pose, and which fingers
+/// were read as out.
+/// </remarks>
+public sealed class GestureConfig
+{
+    /// <summary>MediaPipe palm detector, relative to the install directory.</summary>
+    public string PalmModelPath { get; set; } = "models/palm_detection_mediapipe.onnx";
+
+    /// <summary>MediaPipe 21-point hand landmarker.</summary>
+    public string LandmarkModelPath { get; set; } = "models/handpose_estimation_mediapipe.onnx";
+
+    /// <summary>
+    /// How often the hand is looked at while gesture mode is off, in Hz.
+    ///
+    /// This is the rent the feature charges for being switched on, and it is the
+    /// number to lower first if it costs too much: the player is in this state
+    /// essentially all of the time. Three a second is enough because the only
+    /// thing that has to be caught here is a palm held still for a second, which
+    /// this samples four times.
+    ///
+    /// Measured cost of one pass on this machine: 12.2 ms to find a hand plus
+    /// 5.6 ms to read it, so about 53 ms a second, or 5% of one core. On the
+    /// machine this project has been reported against, which runs the face
+    /// models four to five times slower, budget four to five times that.
+    /// </summary>
+    public double IdleFps { get; set; } = 3;
+
+    /// <summary>
+    /// How often the hand is looked at inside gesture mode, in Hz.
+    ///
+    /// Four times the idle rate, and affordable because head tracking is paused
+    /// for exactly as long as this applies: the face pipeline costs about 50 ms
+    /// a frame and this costs 5.6, since the palm detector does not run while a
+    /// hand is being followed. Gesture mode is cheaper than the state it
+    /// replaces.
+    ///
+    /// It sets how quickly the player answers. A gesture must be held for
+    /// <see cref="HoldRuns"/> passes, so 12 Hz means a quarter of a second.
+    /// </summary>
+    public double ArmedFps { get; set; } = 12;
+
+    /// <summary>Palm detector confidence floor. Lower finds hands in worse light and more false ones.</summary>
+    public double PalmScoreThreshold { get; set; } = 0.55;
+
+    /// <summary>
+    /// Landmark model confidence floor.
+    ///
+    /// Higher than the detector's on purpose. A weak detection costs one wasted
+    /// landmark call; a weak set of landmarks is a hand shape read off noise,
+    /// and that reaches the gesture table.
+    /// </summary>
+    public double HandScoreThreshold { get; set; } = 0.75;
+
+    /// <summary>
+    /// Seconds an open palm must be held still to enter or leave gesture mode.
+    ///
+    /// Long enough that it cannot happen while reaching for something, short
+    /// enough to not feel like waiting. It is the one gesture that must never
+    /// fire by accident, because firing it switches off head tracking.
+    /// </summary>
+    public double ToggleSeconds { get; set; } = 1.0;
+
+    /// <summary>
+    /// How far the palm may drift during that hold, in palm widths.
+    ///
+    /// In palm widths rather than pixels so it means the same thing at a desk
+    /// and at arm's length. Well under <see cref="SwipeTravelPalms"/>, which is
+    /// what keeps "held still" and "swiped" from ever both being true.
+    /// </summary>
+    public double TogglePalms { get; set; } = 0.6;
+
+    /// <summary>
+    /// Leave gesture mode after this many seconds with no hand in frame.
+    ///
+    /// Not a replacement for the palm toggle — it is the accident case. Without
+    /// it, walking away from a player in gesture mode leaves head tracking
+    /// switched off with nothing on screen to say why.
+    /// </summary>
+    public double IdleTimeoutSeconds { get; set; } = 5.0;
+
+    /// <summary>
+    /// Passes a pose must survive before it fires. 3 at 12 Hz is a quarter second.
+    ///
+    /// The hand passes through shapes on its way between them — a hand closing
+    /// into a fist is briefly a point — and this is what stops those transits
+    /// from counting.
+    /// </summary>
+    public int HoldRuns { get; set; } = 3;
+
+    /// <summary>Seconds between repeats while a volume or field-of-view pose is held.</summary>
+    public double RepeatSeconds { get; set; } = 0.4;
+
+    /// <summary>
+    /// Seconds between repeats while a seek pose is held.
+    ///
+    /// Its own key because a repeat interval is only half of a rate, and the
+    /// other half is the step. Volume moves 5 units and view 5 degrees; a seek
+    /// moves ten seconds of film, so the same interval scrubs far faster than
+    /// anyone can read the picture. At 0.4 s the first version ran forward at 75
+    /// seconds of film a second and overshot every time.
+    /// </summary>
+    public double SeekRepeatSeconds { get; set; } = 0.8;
+
+    /// <summary>
+    /// Say once that gesture control is on but no hand has ever been seen, after
+    /// this many seconds.
+    ///
+    /// At most once, and only while no hand has been found since the stage
+    /// started: someone whose camera can see their hand does not need telling,
+    /// and a hint that returns every time the hands go down would be noise for
+    /// the whole film. The one it is for is the person whose camera points at the
+    /// ceiling, for whom every gesture silently does nothing.
+    /// </summary>
+    public double NoHandHintSeconds { get; set; } = 25;
+
+    /// <summary>
+    /// How close to the frame edge counts as about to leave it, as a fraction of
+    /// the frame.
+    ///
+    /// The hand is still being tracked at this point — this is a warning, not a
+    /// failure. It exists because the failure that follows is silent: the hand
+    /// crosses the edge, tracking stops, and nothing on screen distinguishes that
+    /// from a pose that was not recognised.
+    /// </summary>
+    public double EdgeMargin { get; set; } = 0.06;
+
+    /// <summary>
+    /// Seconds after a gesture fires during which nothing else can.
+    ///
+    /// The hand is still in the shape that fired, and on its way somewhere else,
+    /// for a moment afterwards. A swipe in particular will re-trigger off its own
+    /// follow-through without this.
+    /// </summary>
+    public double CooldownSeconds { get; set; } = 0.5;
+
+    /// <summary>
+    /// How far an open palm must travel sideways to count as a swipe, in palm
+    /// widths.
+    ///
+    /// 1.0, down from 1.5, down from 2.5 — and this time from a measurement
+    /// rather than an argument. A reported session logged the furthest reach in
+    /// every reporting window for ten minutes of deliberate swiping: 0.3, 0.8,
+    /// 0.9, 0.8, 0.3, 0.6, 1.0, 1.0. The threshold sat above every attempt made,
+    /// which is why it almost never fired.
+    ///
+    /// Part of that ceiling was a bug rather than the hand — travel was thrown
+    /// away whenever the landmarker lost the hand for a frame, which is most
+    /// likely mid-sweep — so these numbers understate the motion that was
+    /// actually made. 1.0 is set at the top of what was measured *with* that bug
+    /// present, which is deliberately conservative: with it fixed the same sweeps
+    /// should clear it comfortably.
+    ///
+    /// Against <see cref="SwipeRestPalms"/> at 0.35 that is a factor of three,
+    /// which is the separation that matters: a swipe has to be three times
+    /// further than the stillness that starts one.
+    ///
+    /// The log still prints the furthest reach measured, so this can be set from
+    /// what your own hand does rather than from this note.
+    /// </summary>
+    public double SwipeTravelPalms { get; set; } = 1.0;
+
+    /// <summary>
+    /// How far the palm may wander and still count as the place a swipe starts
+    /// from, in palm widths.
+    ///
+    /// Swipe travel is measured from where the hand last sat still, and this is
+    /// half of what "still" means — the other half is
+    /// <see cref="SwipeRestSeconds"/>. While the palm stays inside this circle
+    /// for that long, the anchor simply follows it, so a slow drift can never
+    /// accumulate into a swipe however long it goes on.
+    ///
+    /// It is also the only thing that clears a spent swipe, which is what puts a
+    /// deliberate pause between one file change and the next.
+    /// </summary>
+    public double SwipeRestPalms { get; set; } = 0.35;
+
+    /// <summary>
+    /// How long the palm must stay inside that circle to count as still.
+    ///
+    /// The pair sets the slowest hand that still reads as a swipe: 0.35 palm
+    /// widths in 0.25 s is about 1.4 palm widths a second, or a hand crossing its
+    /// own width in three quarters of a second. Anything slower is a drift and
+    /// never starts a stroke at all.
+    ///
+    /// It must be a span of time and not the gap between two readings. Compared
+    /// frame to frame at ten looks a second, a brisk sweep moves only about a
+    /// third of a palm width between two of them, so every sweep would read as
+    /// still and no swipe could ever fire.
+    /// </summary>
+    public double SwipeRestSeconds { get; set; } = 0.25;
+
+    /// <summary>
+    /// How long one stroke may take, in seconds.
+    ///
+    /// 0.9, and it no longer has to hold both ends. It used to: travel was
+    /// measured across a sliding window of this length, so the window was the
+    /// only thing standing between a slow drift and a file change, and it could
+    /// not be lengthened without letting drift through. Rest detection took that
+    /// job — a drift never leaves <see cref="SwipeRestSeconds"/> and so never
+    /// starts a stroke — which frees this to be what its name says and to be
+    /// generous about it.
+    ///
+    /// Generous on purpose. At 1.0 palm widths of travel, 0.9 s asks for 1.1 palm
+    /// widths a second while the rest test already demands about 1.4 to begin at
+    /// all. Any sweep quick enough to start is therefore quick enough to finish,
+    /// which is the arrangement to keep: two limits that can both bind are two
+    /// ways for the gesture to fail silently.
+    ///
+    /// It also bounds the damage when a stroke does not complete. The anchor is
+    /// re-placed at the hand after this long, so an abandoned sweep costs one
+    /// window rather than sitting there waiting to combine with the next motion.
+    /// </summary>
+    public double SwipeSeconds { get; set; } = 0.9;
 }
 
 public sealed class SourceConfig
@@ -496,7 +758,18 @@ public sealed class UiConfig
     /// </summary>
     public bool FaceTracking { get; set; }
 
-    /// <summary>Reserved for gesture control, which does not exist yet.</summary>
+    /// <summary>
+    /// Whether the camera watches for hand gestures.
+    ///
+    /// Off until asked for, and remembered once it has been, for the same reason
+    /// <see cref="FaceTracking"/> is: a camera that opens itself is a surprise,
+    /// and this one can also pause head tracking, which would be a second
+    /// surprise with no visible cause.
+    ///
+    /// Independent of <see cref="FaceTracking"/>. Either can run without the
+    /// other, and with both on the camera is still opened exactly once — see
+    /// <c>CameraFaceSource</c>, which owns the device and runs both stages.
+    /// </summary>
     public bool GestureControl { get; set; }
 
     /// <summary>Remember the VR mode chosen for each file and restore it on reopen.</summary>

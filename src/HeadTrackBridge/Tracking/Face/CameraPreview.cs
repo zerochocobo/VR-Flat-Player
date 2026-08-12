@@ -56,13 +56,38 @@ public static class CameraPreview
             Volatile.Write(ref ended, true);
         };
 
+        // What fired, and when, held long enough to read.
+        //
+        // The preview exists to answer "is this gesture being recognised", and
+        // without this it answered everything except that: the landmarks, the
+        // pose and the finger states were all on screen while the one event
+        // they lead up to left no trace at all. Two seconds because a gesture
+        // and the glance at the screen afterwards are not simultaneous.
+        var lastAction = "";
+        var lastActionAt = DateTime.MinValue;
+        source.GestureFired += g =>
+        {
+            var action = Hand.GestureMap.Resolve(g, source.VrMode);
+            lastAction = $"{g.Pose}{(g.Swipe ? " swipe" : "")} " +
+                         $"{(g.Direction == Hand.Direction.None ? "" : g.Direction.ToString())} -> {action}";
+            lastActionAt = DateTime.UtcNow;
+            Console.WriteLine($"\n  [gesture] {lastAction}");
+        };
+
         source.FrameProcessed += (frame, lm, pose) =>
         {
             // Cloned under a lock: the capture thread reuses one Mat, so drawing
             // straight onto it would race with the next Read into the same buffer.
             var copy = frame.Clone();
-            Annotate(copy, lm, pose, mirrored);
-            DrawDense(copy, Volatile.Read(ref dense));
+            if (source.FaceEnabled)
+            {
+                Annotate(copy, lm, pose, mirrored);
+                DrawDense(copy, Volatile.Read(ref dense));
+            }
+            DrawHand(copy, source);
+            if ((DateTime.UtcNow - lastActionAt).TotalSeconds < 2)
+                Cv2.PutText(copy, lastAction, new Point(12, 30),
+                            HersheyFonts.HersheySimplex, 0.7, new Scalar(0, 255, 0), 2);
             lock (gate)
             {
                 latest?.Dispose();
@@ -75,10 +100,21 @@ public static class CameraPreview
         Console.WriteLine(mirrored
             ? "  view        mirrored, so it moves the way a mirror does"
             : "  view        NOT mirrored (source.camera.mirror is off)");
-        Console.WriteLine("  green dots  the five landmarks: eyes, nose, mouth corners");
-        Console.WriteLine("  L / R       should sit on YOUR left and right eye");
-        Console.WriteLine("  blue line   where the head is pointing");
-        Console.WriteLine("  no dots     no face found — check lighting and framing");
+        if (source.FaceEnabled)
+        {
+            Console.WriteLine("  green dots  the five landmarks: eyes, nose, mouth corners");
+            Console.WriteLine("  L / R       should sit on YOUR left and right eye");
+            Console.WriteLine("  blue line   where the head is pointing");
+            Console.WriteLine("  no dots     no face found — check lighting and framing");
+        }
+        if (source.GestureEnabled)
+        {
+            Console.WriteLine("  white dots  the 21 hand landmarks");
+            Console.WriteLine("  T I M R P   thumb, index, middle, ring, pinky — capital = read as out");
+            Console.WriteLine("              a gesture that will not register is nearly always one");
+            Console.WriteLine("              of these being lower case when the finger is straight");
+            Console.WriteLine("  ARMED       gesture mode: hold an open palm still for a second");
+        }
         Console.WriteLine();
 
         // A camera that never opens, or opens and never delivers, must not leave
@@ -151,6 +187,58 @@ public static class CameraPreview
             if (i >= pts.Length) continue;
             Cv2.Circle(frame, new Point((int)pts[i].X, (int)pts[i].Y), 4, new Scalar(0, 230, 255), -1);
         }
+    }
+
+    /// <summary>
+    /// The hand, the pose read from it, and which fingers that reading counted
+    /// as out.
+    /// </summary>
+    /// <remarks>
+    /// The finger flags are the reason this exists. Landmarks that sit neatly on
+    /// the hand and a gesture that still will not fire is the failure this
+    /// project cannot debug from a log: it means one finger is being classified
+    /// wrongly, and which one decides whether the fix is a threshold, the
+    /// lighting, or the way the hand is being held. Printing the letters next to
+    /// the hand answers that in one glance.
+    /// </remarks>
+    private static void DrawHand(Mat frame, CameraFaceSource source)
+    {
+        if (source.Gestures is not { } g) return;
+
+        var white = new Scalar(240, 240, 240);
+        var amber = new Scalar(0, 200, 255);
+        var green = new Scalar(0, 255, 0);
+
+        if (g.LastHand is { } hand)
+            foreach (var p in hand.Points)
+                Cv2.Circle(frame, new Point((int)p.X, (int)p.Y), 3, white, -1);
+
+        var y = frame.Height - 76;
+        if (g.LastReading is { } r)
+        {
+            // Wrist first, so the label follows the hand rather than sitting in
+            // a corner while the thing it describes moves.
+            var names = "TIMRP";
+            var fingers = string.Concat(r.Fingers.Select(
+                (out_, i) => out_ ? names[i] : char.ToLowerInvariant(names[i])));
+
+            var at = new Point((int)r.Centre.X - 40, (int)r.Centre.Y - 20);
+            Cv2.PutText(frame, $"{r.Pose}{(r.Direction == Hand.Direction.None ? "" : " " + r.Direction)}",
+                        at, HersheyFonts.HersheySimplex, 0.6, green, 2);
+            Cv2.PutText(frame, fingers, new Point(at.X, at.Y + 22),
+                        HersheyFonts.HersheySimplex, 0.6, amber, 2);
+        }
+        else
+        {
+            Cv2.PutText(frame, "no hand", new Point(12, y),
+                        HersheyFonts.HersheySimplex, 0.6, amber, 2);
+        }
+
+        Cv2.PutText(frame,
+                    $"{(g.Armed ? "ARMED" : "idle")}  {(g.Scanning ? "scanning" : "tracking")}  " +
+                    $"palm {g.LastPalmMs:F0} ms  hand {g.LastLandmarkMs:F0} ms",
+                    new Point(12, frame.Height - 16),
+                    HersheyFonts.HersheySimplex, 0.55, g.Armed ? green : white, 2);
     }
 
     /// <summary>

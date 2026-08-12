@@ -107,6 +107,17 @@ public sealed class PlayerModeController
     /// </summary>
     public const double DefaultFovDegrees = 80;
 
+    /// <summary>
+    /// One step of the field of view, for every control that offers one.
+    ///
+    /// Named for the same reason the default above is: there are now four ways
+    /// to change it — the wheel, Ctrl+Shift+Up/Down, the VR menu and a thumb
+    /// held up at the camera — and three of them are in different files. The
+    /// fourth, mpv's own binding, is in input.conf and has to be kept in step by
+    /// hand, because mpv cannot read a C# constant.
+    /// </summary>
+    public const double FovStepDegrees = 5;
+
     public async Task SetFovAsync(double degrees, ModeOrigin origin = ModeOrigin.User)
     {
         // Down to 10 degrees, not 40. Narrowing the field of view is how you
@@ -121,6 +132,23 @@ public sealed class PlayerModeController
         await _driver.SetFovAsync(FovDegrees).ConfigureAwait(false);
         await BroadcastAsync().ConfigureAwait(false);
         Changed?.Invoke(Describe(), origin);
+
+        // Say the number, once, wherever the change came from.
+        //
+        // There are four ways to change this — the wheel, Ctrl+Shift+Up/Down,
+        // the VR menu and a thumb held at the camera — and until now none of
+        // them put anything on screen. The clamp above is exactly why that
+        // matters: at 10 or at 160 the picture stops responding, and with no
+        // number there is nothing to distinguish "as far as it goes" from
+        // "the control has stopped working".
+        //
+        // Announced here rather than at each of the four call sites, which is
+        // also what keeps the gesture from toasting twice.
+        if (origin == ModeOrigin.User)
+            await _ipc.ShowTextAsync(
+                UiStrings.Current.F("osd.fov",
+                    FovDegrees.ToString("F0", CultureInfo.CurrentCulture)),
+                1200).ConfigureAwait(false);
     }
 
     public Task AdjustFovAsync(double deltaDegrees) => SetFovAsync(FovDegrees + deltaDegrees);

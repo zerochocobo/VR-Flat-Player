@@ -5,10 +5,10 @@
 <img src="assets/icon-256.png" width="128" alt="VR Flat Player">
 
 **180° / 360° VR 영상을 일반 평면 모니터에서** 편하게 보기 위한 데스크톱
-플레이어입니다. 로컬 8K도 재생합니다. 일반 웹캠으로 머리 움직임을 추적해 시야를
-자동으로 돌릴 수도 있습니다.
+플레이어입니다. 로컬 8K도 재생합니다. 일반 웹캠으로 머리 움직임에 따라 시야를 돌리고,
+손 제스처로 재생·탐색·음량·파일 전환을 조작할 수도 있습니다. 둘 다 기본은 꺼짐입니다.
 
-버전 0.3, Windows 전용.
+버전 0.4, Windows 전용.
 
 ![VR Flat Player](assets/screen/screen_ko.png)
 
@@ -48,6 +48,10 @@
 - **웹캠 머리 추적**(기본 꺼짐). YuNet이 얼굴을 찾고, 68점 랜드마커가 위치를 잡고,
   PnP가 머리 자세로 바꿉니다. 마커도, 추가 장비도, opentrack 설치도 필요 없습니다.
   이미 opentrack을 쓰고 있다면 UDP 입력도 그대로 지원합니다.
+- **손 제스처 제어**, 기본값은 꺼짐. 손바닥을 펴고 카메라 앞에서 1초간 멈추면 제스처
+  모드로 들어가고, 이후 주먹으로 재생/일시정지, 검지로 탐색, 엄지로 볼륨, 편 손바닥을
+  옆으로 휘두르면 파일이 바뀝니다. 제스처 모드 밖에서는 아무것도 반응하지 않고,
+  모드 중에는 머리 추적이 일시 중지됩니다.
 - **드래그로 시야 이동**, 키보드 시야 이동, 휠 확대/축소.
 - **네이티브 메뉴 바**(영상 위에 겹치는 오버레이가 아닙니다). 영어, 중국어 간체·번체,
   일본어, 한국어를 지원하며 OS 언어를 따릅니다.
@@ -75,7 +79,7 @@ git clone <이 저장소>
 cd VRHeadTrackingPlayer
 
 tools\install-mpv360.bat      # mpv360 셰이더, uosc, 폰트
-tools\install-models.bat      # ONNX 모델 두 개
+tools\install-models.bat      # ONNX 모델 네 개
 
 dotnet run --project tests/VideoFormatTests/VideoFormatTests.csproj -c Release
 powershell -ExecutionPolicy Bypass -File tools/publish.ps1
@@ -89,16 +93,20 @@ mpv.exe가 필요하며, 설치된 것을 찾거나 `-MpvExe <경로>`로 지정
 
 ### ONNX 모델은 이 저장소에 없습니다
 
-머리 추적에는 모델 두 개(합쳐서 약 14 MB)가 필요합니다. **커밋하지 않았습니다** —
-바이너리는 소스 히스토리에 들어갈 것이 아니고, 둘 다 각자의 라이선스로 다른 곳에
-공개되어 있기 때문입니다. `tools\install-models.bat`이 `models\`로 내려받습니다.
+머리 추적과 제스처 제어에는 모델 네 개(합쳐서 약 21 MB)가 필요합니다.
+**커밋하지 않았습니다** — 바이너리는 소스 히스토리에 들어갈 것이 아니고, 네 개 모두
+각자의 라이선스로 다른 곳에 공개되어 있기 때문입니다. `tools\install-models.bat`이
+`models\`로 내려받습니다.
 
-| 파일 | 모델 | 출처 | 라이선스 |
-| --- | --- | --- | --- |
-| `face_detection_yunet.onnx` | YuNet | [opencv/opencv_zoo](https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx) | MIT |
-| `face_landmark_peppa_wutz.onnx` | peppa_wutz 68점 | [facefusion/facefusion-assets](https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/peppa_wutz.onnx) | MIT |
+| 파일 | 모델 | 용도 | 출처 | 라이선스 |
+| --- | --- | --- | --- | --- |
+| `face_detection_yunet.onnx` | YuNet | 머리 | [opencv/opencv_zoo](https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx) | MIT |
+| `face_landmark_peppa_wutz.onnx` | peppa_wutz 68점 | 머리 | [facefusion/facefusion-assets](https://github.com/facefusion/facefusion-assets/releases/download/models-3.0.0/peppa_wutz.onnx) | MIT |
+| `palm_detection_mediapipe.onnx` | MediaPipe BlazePalm | 손 | [opencv/opencv_zoo](https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/palm_detection_mediapipe/palm_detection_mediapipe_2023feb.onnx) | Apache 2.0 |
+| `handpose_estimation_mediapipe.onnx` | MediaPipe 손 21점 | 손 | [opencv/opencv_zoo](https://media.githubusercontent.com/media/opencv/opencv_zoo/main/models/handpose_estimation_mediapipe/handpose_estimation_mediapipe_2023feb.onnx) | Apache 2.0 |
 
-없어도 플레이어는 정상 동작하며, 머리 추적만 사용할 수 없습니다.
+없어도 플레이어는 정상 동작하며, 머리 추적과 제스처 제어만 사용할 수 없습니다.
+두 기능은 서로 독립적이라 한쪽 짝만 있어도 그 기능은 쓸 수 있습니다.
 
 ### mpv도 저장소에 없습니다
 
@@ -129,11 +137,55 @@ mpv는 별개의 GPL 프로그램이며, 링크하는 것이 아니라 **별도 
 | `1` / `2` | 대비 낮추기 / 높이기 |
 | `Ctrl+Shift+V` | 머리 기준은 두고 시야만 초기화 |
 | `Ctrl+Shift+H` | 머리 추적 켜기/끄기 |
+| `Ctrl+Shift+W` | 제스처 제어 켜기/끄기 |
 | `Ctrl+[` / `Ctrl+]` | 추적 게인 − / + |
 | `Ctrl+Shift+I` | 재생 통계 |
 | `F` | 전체 화면 |
 
 mpv 본래의 키(스페이스, 방향키, 음량)도 그대로 동작합니다.
+
+## 손 제스처
+
+기본값은 꺼짐입니다. **카메라 ▸ 제스처 제어**에서 켜거나 `Ctrl+Shift+W`를 누르세요.
+켜도 카메라가 보기 시작할 뿐이고, 제스처 모드에 들어가기 전에는 아무것도 반응하지
+않습니다.
+
+**손바닥을 펴고 카메라 앞에서 1초간 멈추면** 제스처 모드로 들어가고, 다시 하면
+나옵니다. 모드 중에는 **머리 추적이 일시 중지**됩니다. 손을 흔들면 머리도 움직이는데,
+그동안 화면이 따라 흔들리느니 시야 제어가 없는 편이 낫기 때문입니다. 모서리의 얼굴
+아이콘이 호박색으로 바뀌어 이를 알려 줍니다.
+
+| 제스처 | 일반 영상 | VR 영상 |
+| --- | --- | --- |
+| 주먹 | 재생 / 일시정지 | 재생 / 일시정지 |
+| 검지로 왼쪽 / 오른쪽 | 10초 뒤로 / 10초 앞으로 | 10초 뒤로 / 10초 앞으로 |
+| 엄지 위 / 아래 | 볼륨 올리기 / 내리기 | 시야 좁게 / 넓게 |
+| 편 손바닥을 왼쪽 / 오른쪽으로 휘두르기 | 이전 / 다음 파일 | 이전 / 다음 파일 |
+
+이 목록은 제스처 모드가 켜져 있는 동안 화면 오른쪽에 한 줄씩 계속 표시됩니다.
+
+각 동작은 0.25초 정도 유지합니다. 엄지와 검지는 계속 들고 있으면 반복됩니다
+(볼륨, 시야, 탐색은 모두 조절량입니다). 재생/일시정지와 파일 전환은 한 번만 실행되며
+다시 쓰려면 손이 그 모양을 벗어나야 합니다. 탐색만은 반복이 더 느립니다. 한 번에
+볼륨 5칸이 아니라 영상 10초를 움직이므로, 같은 속도로는 노리던 곳을 지나쳐 버립니다.
+손이 5초간 보이지 않으면 제스처 모드도 저절로 끝납니다.
+
+휘두르기는 **멈춘 상태에서 시작**해 손바닥 하나 너비만큼 가로로 움직이고 1초 안에
+끝나야 합니다. 멈춘 상태에서 시작하게 한 것은 천천히 흘러가는 손이 파일을 바꿔 버리지
+않게 하기 위해서이고, 동시에 다음 전환까지의 간격이기도 합니다. 손을 되돌리고 잠깐
+멈춘 뒤 다시 휘두르세요.
+
+제스처 제어가 켜져 있으면 손이 보일 때마다 **오른쪽 아래에 작은 패널**이 나타나
+카메라가 읽은 21개 랜드마크와 손바닥 유지 진행 막대를 보여 줍니다. 머리 추적은 화면
+자체가 반응이지만 제스처는 무언가 실행되기 전까지 화면이 변하지 않아서 "자세가 인식되지
+않음", "손이 화면 밖에 있음", "카메라가 열리지 않음"이 똑같아 보입니다. 이 패널은 그
+셋을 구분하기 위한 것입니다. 왼쪽 위에는 두 가지 경고가 더 나옵니다. 손이 화면 가장자리에
+닿을 때, 그리고 한동안 지켜봤는데 손을 한 번도 찾지 못했을 때(대개 카메라 각도가 너무
+높거나 방이 너무 어둡습니다)입니다.
+
+`VRFlatPlayer --gesture-preview`를 실행하면 21개 랜드마크와 인식된 포즈, 그리고 어떤
+손가락이 펴진 것으로 판정됐는지 볼 수 있습니다. 제스처가 인식되지 않을 때 이유를
+알려 주는 것은 대개 마지막 항목입니다.
 
 ## 설정
 
@@ -152,7 +204,13 @@ mpv 본래의 키(스페이스, 방향키, 음량)도 그대로 동작합니다.
 | `filter.glideMaxSeconds` | 0.30 | 포즈 간격이 넓을 때 글라이드를 늘릴 수 있는 상한. 느린 기기에서 부드럽게 움직이는지 계단처럼 끊기는지가 여기서 갈린다. `glideSeconds`와 같은 값으로 두면 고정 글라이드로 돌아간다 |
 | `source.camera.landmarkFps` | 30 | 랜드마커의 초당 실행 횟수 상한 |
 | `source.camera.detectWidth` | 640 | 얼굴 검출기가 보는 가로 크기. 0이면 전체 프레임. 1280보다 5배 싸고 박스는 그대로 쓸 만하다 |
+| `source.camera.detectFps` | 2 | 얼굴을 따라가는 동안 얼굴 검출기를 다시 실행하는 빈도(Hz). 검출기의 답은 프레임 사이에 거의 변하지 않으며, 매 프레임 필요한 것은 68점 모델입니다. `detectWidth`보다 이것을 먼저 |
+| `source.camera.width` / `height` | 1280 / 720 | 캡처 해상도. **카메라 ▸ 카메라 해상도** 메뉴에도 있습니다. 얼굴에 화소가 많을수록 자세 노이즈가 줄지만, `detectWidth` 가 검출기가 보는 크기를 제한하므로 검출 자체가 좋아지지는 않습니다 |
 | `source.camera.trackingCpuShare` | 0.75 | 추적 파이프라인 전체가 쓸 수 있는 시간 비율. 낮추면 CPU는 줄지만 머리 움직임에 화면이 따라오는 지연이 같은 배율로 늘어난다 |
+| `source.camera.gesture.idleFps` | 3 | 제스처 모드가 아닐 때 손을 보는 빈도. 쓰지 않는 동안의 비용 그 자체이며(이 기기에서 코어의 약 5%), CPU를 아끼려면 먼저 여기를 |
+| `source.camera.gesture.toggleSeconds` | 1.0 | 제스처 모드에 들어가고 나올 때 손바닥을 멈춰야 하는 시간 |
+| `source.camera.gesture.swipeTravelPalms` | 1.0 | 휘두르기에 필요한 이동량. 픽셀이 아니라 손바닥 너비라 거리와 무관. 실제로 어디까지 갔는지는 로그에 나옵니다 |
+| `source.camera.gesture.seekRepeatSeconds` | 0.8 | 탐색을 계속 들고 있을 때의 반복 간격. 한 번의 폭이 커서 `repeatSeconds`와 분리 |
 
 창 위치, 파일별 VR 모드, 실행 로그는 각각 `window-state.json`,
 `mode-memory.json`, `mpv-last-run.log`에 나뉘어 있습니다. **나눈 것은 의도적**이며,

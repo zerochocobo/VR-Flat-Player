@@ -54,6 +54,17 @@ local STRINGS = {
         reset = '复位',
         hint = '%s 关闭   ·   Ctrl+Shift+G / D / Y 不开菜单直接切换   ·   拖动画面可转视角',
         not_connected = '桥接层未连接 —— 请通过 VR Flat Player 启动播放',
+        ['no hand'] = '未看到手', ['open palm'] = '张开手掌', ['fist'] = '握拳',
+        ['point'] = '食指', ['thumb'] = '拇指',
+        Gestures = '手势',
+        ['fist - play / pause'] = '握拳 · 播放 / 暂停',
+        ['index left / right - seek'] = '食指左右 · 快退 / 快进',
+        ['thumb up / down - volume'] = '拇指上下 · 音量',
+        ['thumb up / down - view'] = '拇指上下 · 视野',
+        ['wave left / right - file'] = '挥手左右 · 上一部 / 下一部',
+        ['hold palm - leave gestures'] = '手掌静止一秒 · 退出手势',
+        ['hand at the edge of the picture'] = '手快出画面了',
+        ['no camera hand'] = '一直没看到手 —— 检查摄像头角度和光线',
     },
     ['zh-hant'] = {
         Projection = '投影', Stereo = '立體', Eye = '眼別', Fov = '視角',
@@ -65,6 +76,17 @@ local STRINGS = {
         reset = '復位',
         hint = '%s 關閉   ·   Ctrl+Shift+G / D / Y 不開選單直接切換   ·   拖動畫面可轉視角',
         not_connected = '橋接層未連線 —— 請透過 VR Flat Player 啟動播放',
+        ['no hand'] = '未看到手', ['open palm'] = '張開手掌', ['fist'] = '握拳',
+        ['point'] = '食指', ['thumb'] = '拇指',
+        Gestures = '手勢',
+        ['fist - play / pause'] = '握拳 · 播放 / 暫停',
+        ['index left / right - seek'] = '食指左右 · 快退 / 快進',
+        ['thumb up / down - volume'] = '拇指上下 · 音量',
+        ['thumb up / down - view'] = '拇指上下 · 視野',
+        ['wave left / right - file'] = '揮手左右 · 上一部 / 下一部',
+        ['hold palm - leave gestures'] = '手掌靜止一秒 · 退出手勢',
+        ['hand at the edge of the picture'] = '手快出畫面了',
+        ['no camera hand'] = '一直沒看到手 —— 檢查攝影機角度和光線',
     },
     ['ja'] = {
         Projection = '投影', Stereo = '立体', Eye = '目', Fov = '視野',
@@ -76,6 +98,17 @@ local STRINGS = {
         reset = 'リセット',
         hint = '%s 閉じる   ·   Ctrl+Shift+G / D / Y でパネルを開かずに切替   ·   ドラッグで視点を回す',
         not_connected = 'ブリッジ未接続 —— VR Flat Player から起動してください',
+        ['no hand'] = '手が見えません', ['open palm'] = '開いた手', ['fist'] = '握りこぶし',
+        ['point'] = '人差し指', ['thumb'] = '親指',
+        Gestures = 'ジェスチャー',
+        ['fist - play / pause'] = 'こぶし · 再生 / 一時停止',
+        ['index left / right - seek'] = '人差し指 左右 · 早戻し / 早送り',
+        ['thumb up / down - volume'] = '親指 上下 · 音量',
+        ['thumb up / down - view'] = '親指 上下 · 視野',
+        ['wave left / right - file'] = '手を振る 左右 · 前 / 次のファイル',
+        ['hold palm - leave gestures'] = '手のひら静止 1 秒 · ジェスチャー終了',
+        ['hand at the edge of the picture'] = '手が画面の端にあります',
+        ['no camera hand'] = '手が見つかりません —— カメラの向きと明るさを確認',
     },
     ['ko'] = {
         Projection = '투영', Stereo = '입체', Eye = '눈', Fov = '시야',
@@ -87,6 +120,17 @@ local STRINGS = {
         reset = '초기화',
         hint = '%s 닫기   ·   Ctrl+Shift+G / D / Y 로 패널 없이 전환   ·   드래그하여 시점 회전',
         not_connected = '브리지가 연결되지 않았습니다 —— VR Flat Player 로 실행하세요',
+        ['no hand'] = '손이 보이지 않음', ['open palm'] = '편 손바닥', ['fist'] = '주먹',
+        ['point'] = '검지', ['thumb'] = '엄지',
+        Gestures = '제스처',
+        ['fist - play / pause'] = '주먹 · 재생 / 일시정지',
+        ['index left / right - seek'] = '검지 좌우 · 되감기 / 빨리감기',
+        ['thumb up / down - volume'] = '엄지 상하 · 음량',
+        ['thumb up / down - view'] = '엄지 상하 · 시야',
+        ['wave left / right - file'] = '손 흔들기 좌우 · 이전 / 다음 파일',
+        ['hold palm - leave gestures'] = '손바닥 1초 정지 · 제스처 종료',
+        ['hand at the edge of the picture'] = '손이 화면 가장자리에 있습니다',
+        ['no camera hand'] = '손을 찾지 못했습니다 —— 카메라 각도와 조명을 확인',
     },
 }
 
@@ -486,15 +530,48 @@ end
 -- across machines for a face or a hand, and shipping one for two icons is not
 -- worth it.
 local status_overlay = mp.create_osd_overlay('ass-events')
-local tracker = { face = false, hand = false, hand_ready = false }
+local tracker = { face = 'off', hand = 'off' }
+
+-- Forward declarations. The hand drawing is defined further down, next to the
+-- messages that feed it, but redraw_status has to be able to call it — and a
+-- Lua local is not visible inside a function body written above it.
+local draw_hand_preview
+local draw_gesture_legend
+local draw_hand_warnings
+
+-- How much of the bottom of the window uosc is currently occupying, as a
+-- fraction of its height.
+--
+-- uosc publishes this for exactly this purpose, and it is non-zero only while
+-- the bar is up to stay — which, with `timeline_persistency=paused` in
+-- script-opts/uosc.conf, means while the file is paused. That matters here more
+-- than it sounds: pausing is the single most-used gesture, so the bar is up for
+-- most of the time anyone is gesturing, and the hand panel was being drawn
+-- underneath it.
+--
+-- Reading the property rather than measuring the bar keeps the two from
+-- drifting apart when uosc's sizes are changed in its own config.
+local osc_bottom = 0
 
 local ON_COLOR = '&H66E06A&'      -- BGR: green, "this is driving the view"
-local OFF_COLOR = '&H707070&'     -- grey, present but idle
-local DIM_COLOR = '&H3A3A3A&'     -- very dim, feature does not exist yet
+local OFF_COLOR = '&H707070&'     -- grey, switched on but not doing anything
+local DIM_COLOR = '&H3A3A3A&'     -- very dim, the feature is switched off
+local PAUSED_COLOR = '&H20B0FF&'  -- BGR: amber, standing aside for the moment
 
-local function status_color(on, ready)
-    if not ready then return DIM_COLOR end
-    return on and ON_COLOR or OFF_COLOR
+-- Four states, and amber is the one that earns the extra colour.
+--
+-- Head tracking stops driving the view while gesture mode is on, and it has to
+-- look different from having been switched off: one ends by itself in a second
+-- or two and the other is waiting for the user to do something. Drawn the same
+-- as off, they would be told apart only by remembering what you last pressed.
+--
+-- Returns the colour and whether the silhouette is filled, because a filled
+-- shape is what reads as "active" across the room and only two of the four are.
+local function status_color(state)
+    if state == 'on' then return ON_COLOR, true end
+    if state == 'paused' then return PAUSED_COLOR, true end
+    if state == 'idle' then return OFF_COLOR, false end
+    return DIM_COLOR, false
 end
 
 -- Outline in both states, and only a part-transparent fill when on.
@@ -504,17 +581,17 @@ end
 -- featureless blob, and the hand's fingers merged into its palm. Keeping the
 -- border means the silhouette survives being lit, and the fill still makes
 -- on/off obvious at a glance.
-local function shape_style(ass, colour, on, s)
+local function shape_style(ass, colour, filled, s)
     ass:append(string.format('{\\1c%s\\3c%s\\bord%.1f\\shad0\\1a%s}',
-        colour, colour, 1.6 * s, on and '&H99&' or '&HFF&'))
+        colour, colour, 1.6 * s, filled and '&H99&' or '&HFF&'))
 end
 
-local function draw_face(ass, cx, cy, r, on, ready)
-    local colour = status_color(on, ready)
+local function draw_face(ass, cx, cy, r, state)
+    local colour, filled = status_color(state)
 
     ass:new_event()
     ass:pos(cx, cy)
-    shape_style(ass, colour, on, r / 11)
+    shape_style(ass, colour, filled, r / 11)
     ass:draw_start()
     ass:round_rect_cw(-r, -r, r, r, r)      -- radius = half the box, i.e. a circle
     ass:draw_stop()
@@ -532,12 +609,12 @@ local function draw_face(ass, cx, cy, r, on, ready)
     ass:draw_stop()
 end
 
-local function draw_hand(ass, cx, cy, r, on, ready)
-    local colour = status_color(on, ready)
+local function draw_hand(ass, cx, cy, r, state)
+    local colour, filled = status_color(state)
 
     ass:new_event()
     ass:pos(cx, cy)
-    shape_style(ass, colour, on, r / 11)
+    shape_style(ass, colour, filled, r / 11)
     ass:draw_start()
     -- Palm, then three fingers and a thumb. Crude, but at this size the
     -- silhouette is the whole message.
@@ -560,19 +637,319 @@ local function redraw_status()
     local gap = 34 * s
 
     local ass = assdraw.ass_new()
-    -- Hand furthest right so the face keeps the same place when the hand icon
-    -- eventually becomes interactive.
-    draw_hand(ass, osd_w - pad - r, pad + r, r, tracker.hand, tracker.hand_ready)
-    draw_face(ass, osd_w - pad - r - gap, pad + r, r, tracker.face, true)
+    -- Hand furthest right so the face keeps the same place whatever the hand is
+    -- doing.
+    draw_hand(ass, osd_w - pad - r, pad + r, r, tracker.hand)
+    draw_face(ass, osd_w - pad - r - gap, pad + r, r, tracker.face)
+
+    -- Bottom right, lifted clear of uosc's control bar when it is up. 42 is the
+    -- gap the bar leaves when it is *not* up, so the panel never sits on the very
+    -- bottom edge either.
+    local bottom = osd_h - pad - 42 * s - osc_bottom * osd_h
+    local panel_h = draw_hand_preview(ass, osd_w - pad, bottom, s)
+
+    -- Above the panel, sharing its right edge. The legend and the picture of
+    -- your own hand are one block: the panel says whether the camera can see
+    -- you, the legend says what to do about it.
+    draw_gesture_legend(ass, osd_w - pad, bottom - panel_h - 10 * s, s)
+
+    draw_hand_warnings(ass, pad, pad, s)
+
     status_overlay.data = ass.text
     status_overlay:update()
 end
 
--- face: on|off, hand: on|off|na  ("na" = gesture control not implemented yet)
+-- uosc's bar coming and going has to move the panel, and nothing else redraws
+-- this overlay on that event.
+mp.observe_property('user-data/osc/margins', 'native', function(_, v)
+    local b = (type(v) == 'table' and tonumber(v.b)) or 0
+    if b ~= osc_bottom then
+        osc_bottom = b
+        redraw_status()
+    end
+end)
+
+-- face: on | paused (yielding to gesture mode) | off
+-- hand: on (gesture mode) | idle (watching for the palm) | off
 mp.register_script_message('tracker-state', function(face, hand)
-    tracker.face = face == 'on'
-    tracker.hand = hand == 'on'
-    tracker.hand_ready = hand ~= 'na'
+    tracker.face = face or 'off'
+    tracker.hand = hand or 'off'
+    redraw_status()
+end)
+
+------------------------------------------------------------ hand preview ----
+
+-- What the camera can see of your hand, in the corner of the picture.
+--
+-- Head tracking needs nothing like this because it has the picture itself as
+-- feedback: turn your head, the view moves, and if it does not you know at once.
+-- Gestures have no such channel. Until something fires there is nothing on
+-- screen at all, so "the pose was not recognised" and "my hand is outside the
+-- frame" and "the camera never opened" all look identical — and the natural
+-- response to all three is to keep making the gesture harder, which fixes none
+-- of them.
+--
+-- So this draws the 21 landmarks as they arrive. It is deliberately not a
+-- diagnostic: no numbers, no finger states, no confidence. The only questions
+-- it answers are "does it see my hand" and "is my hand in the right place",
+-- which are the two the picture cannot answer on its own.
+local hand_view = {
+    state = 'off',    -- off | looking | armed
+    hold = 0,         -- 0..1 through the palm hold that toggles gesture mode
+    pose = '',
+    points = nil,     -- 42 normalised numbers, or nil
+    seen_at = -1e9,
+    edge = false,     -- part of the hand is against the edge of the picture
+    vr = false,       -- which half of the action table applies to the thumb
+    warning = nil,    -- a STRINGS key sent by the bridge
+    warning_until = 0,
+}
+local hand_timer = nil
+
+-- MediaPipe's own skeleton. Drawn rather than the points alone because 21 loose
+-- dots do not read as a hand at this size, and reading it as a hand at a glance
+-- is the entire job.
+local BONES = {
+    { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 4 },
+    { 0, 5 }, { 5, 6 }, { 6, 7 }, { 7, 8 },
+    { 5, 9 }, { 9, 10 }, { 10, 11 }, { 11, 12 },
+    { 9, 13 }, { 13, 14 }, { 14, 15 }, { 15, 16 },
+    { 13, 17 }, { 17, 18 }, { 18, 19 }, { 19, 20 },
+    { 0, 17 },
+}
+
+-- Visible while gesture mode is on, and for a couple of seconds around a hand
+-- being in view. Not permanently: a panel that is always there stops being
+-- noticed, and this one is only wanted at the moment you raise your hand.
+local function hand_visible()
+    if hand_view.state == 'off' then return false end
+    if hand_view.state == 'armed' then return true end
+    return (mp.get_time() - hand_view.seen_at) < 2.0
+end
+
+--- Returns the height it drew, so what goes above it knows where to start.
+function draw_hand_preview(ass, right, bottom, s)
+    if not hand_visible() then return 0 end
+
+    -- 16:9, because the camera is, and a hand squashed into a square panel
+    -- looks like a hand held wrong.
+    local w = 168 * s
+    local h = w * 9 / 16
+    local x0, y0 = right - w, bottom - h
+
+    local seen = hand_view.points ~= nil
+    local colour = hand_view.state == 'armed' and ON_COLOR or OFF_COLOR
+
+    -- Backing plate. Dark enough that the landmarks read over anything.
+    --
+    -- The first attempt was two thirds transparent, which looked restrained
+    -- against a screenshot of dark footage and vanished completely over a bright
+    -- one — and "over a bright one" includes every moment this panel exists to
+    -- serve, because it is on screen precisely when the user is looking for it.
+    ass:new_event()
+    ass:pos(0, 0)
+    ass:append(string.format('{\\1c&H000000&\\1a&H55&\\3c%s\\3a&H40&\\bord%.1f\\shad0}',
+                             colour, 1.2 * s))
+    ass:draw_start()
+    ass:round_rect_cw(x0, y0, x0 + w, y0 + h, 5 * s)
+    ass:draw_stop()
+
+    if seen then
+        local p = hand_view.points
+        local function px(i) return x0 + p[i * 2 + 1] * w end
+        local function py(i) return y0 + p[i * 2 + 2] * h end
+
+        -- Bones as unfilled strokes: a zero-area path with a border and a fully
+        -- transparent fill is how ASS draws a line.
+        ass:new_event()
+        ass:pos(0, 0)
+        ass:append(string.format('{\\1a&HFF&\\3c%s\\bord%.1f\\shad0}', colour, 1.6 * s))
+        ass:draw_start()
+        for _, b in ipairs(BONES) do
+            ass:move_to(px(b[1]), py(b[1]))
+            ass:line_to(px(b[2]), py(b[2]))
+        end
+        ass:draw_stop()
+
+        ass:new_event()
+        ass:pos(0, 0)
+        ass:append(string.format('{\\1c%s\\bord0\\shad0}', colour))
+        ass:draw_start()
+        for i = 0, 20 do
+            local r = 1.8 * s
+            ass:round_rect_cw(px(i) - r, py(i) - r, px(i) + r, py(i) + r, r)
+        end
+        ass:draw_stop()
+    end
+
+    -- One line of text, and only ever one: the pose when there is one, or the
+    -- fact that no hand is visible when there is not.
+    local label = seen and (hand_view.pose ~= '' and tr(hand_view.pose) or '')
+                        or tr('no hand')
+    if label ~= '' then
+        -- Clear of the progress bar along the bottom edge and of the plate's own
+        -- border. 5 px was not: screenshotting the panel showed the label's
+        -- descenders sitting on the border stroke, which is the sort of thing
+        -- that is invisible in the code and obvious in the picture.
+        ass:new_event()
+        ass:append(string.format('{\\an2\\pos(%.1f,%.1f)\\fs%.1f\\1c%s\\bord%.1f\\3c&H000000&\\shad0}',
+                                 x0 + w / 2, y0 + h - 8 * s, 12 * s, colour, 1.2 * s))
+        ass:append(ass_escape(label))
+    end
+
+    -- How far through the hold that opens and closes gesture mode.
+    --
+    -- The single most valuable thing on this panel. Holding a palm up for a
+    -- second with no acknowledgement is exactly when people conclude the
+    -- feature is broken and stop; a bar that visibly fills says "yes, seen,
+    -- keep going" and, when it does not move, says the pose is not being read
+    -- as an open palm at all.
+    if hand_view.hold > 0.01 then
+        ass:new_event()
+        ass:pos(0, 0)
+        ass:append(string.format('{\\1c%s\\bord0\\shad0}', ON_COLOR))
+        ass:draw_start()
+        ass:rect_cw(x0, y0 + h - 2.5 * s, x0 + w * math.min(1, hand_view.hold), y0 + h)
+        ass:draw_stop()
+    end
+
+    return h
+end
+
+------------------------------------------------------------ hand legend ----
+
+-- The four gestures, listed for as long as gesture mode is on.
+--
+-- Shown for three seconds on entry in the first version, which is the wrong
+-- shape for this. Three seconds is enough to know a list appeared and not
+-- enough to read it, and it is gone by the moment it is wanted — the moment
+-- after a gesture did the wrong thing. Left up, it costs a corner of the
+-- picture during the one mode the user is not watching the film in anyway, and
+-- it is the difference between learning the vocabulary and guessing at it.
+--
+-- One line per gesture, right-aligned against the same edge as the hand panel.
+local function legend_lines()
+    return {
+        tr('fist - play / pause'),
+        tr('index left / right - seek'),
+        tr(hand_view.vr and 'thumb up / down - view' or 'thumb up / down - volume'),
+        tr('wave left / right - file'),
+        tr('hold palm - leave gestures'),
+    }
+end
+
+function draw_gesture_legend(ass, right, bottom, s)
+    if hand_view.state ~= 'armed' then return end
+
+    local lines = legend_lines()
+    local size = 13 * s
+    local step = size * 1.55
+    local pad = 8 * s
+    local h = #lines * step + pad * 2
+
+    -- No text measurement in this script, so the plate is sized from the longest
+    -- line by character count. CJK glyphs are about twice as wide as Latin ones
+    -- at the same size, and every language here is one or the other, so counting
+    -- bytes and dividing by three lands close enough for a backing plate: UTF-8
+    -- spends three bytes on the CJK characters and one on the Latin.
+    local widest = 0
+    for _, line in ipairs(lines) do
+        local cjk = math.floor(#line / 3)
+        local latin = #line - cjk * 3
+        widest = math.max(widest, cjk * size + latin * size * 0.5)
+    end
+    local w = widest + pad * 2
+
+    draw_box(ass, right - w, bottom - h, right, bottom, '&H0D0D0D&', 60)
+
+    local y = bottom - h + pad + step / 2
+    for _, line in ipairs(lines) do
+        ass:new_event()
+        ass:append(string.format('{\\an6\\pos(%.1f,%.1f)\\fs%.1f\\1c%s\\bord%.1f\\3c&H000000&\\shad0}',
+                                 right - pad, y, size, COLORS.text, 1.2 * s))
+        ass:append(ass_escape(line))
+        y = y + step
+    end
+end
+
+---------------------------------------------------------- hand warnings ----
+
+-- The two things that go wrong silently, said out loud in the top left.
+--
+-- Both are failures with no symptom. A hand crossing the edge of the frame
+-- simply stops being tracked, and a camera that cannot see hands at all never
+-- reports anything — in both cases every gesture does nothing, which is exactly
+-- what a switched-off feature also does. Top left because the hand panel and
+-- the tracker icons already own the right-hand side, and because a warning that
+-- shares a corner with the thing it is warning about is easy to miss.
+function draw_hand_warnings(ass, left, top, s)
+    local lines = {}
+
+    if hand_view.state ~= 'off' and hand_view.edge and hand_view.points then
+        lines[#lines + 1] = tr('hand at the edge of the picture')
+    end
+    if hand_view.warning and mp.get_time() < hand_view.warning_until then
+        lines[#lines + 1] = tr(hand_view.warning)
+    end
+    if #lines == 0 then return end
+
+    local size = 14 * s
+    local step = size * 1.6
+    local y = top + step / 2
+    for _, line in ipairs(lines) do
+        ass:new_event()
+        ass:append(string.format('{\\an4\\pos(%.1f,%.1f)\\fs%.1f\\1c%s\\bord%.1f\\3c&H000000&\\shad0}',
+                                 left, y, size, PAUSED_COLOR, 2.0 * s))
+        ass:append(ass_escape(line))
+        y = y + step
+    end
+end
+
+-- state: off | looking | armed
+-- hold:  0..1 through the palm hold
+-- pose:  a STRINGS key, or empty
+-- pts:   42 numbers "x,y,x,y,..." normalised to the camera frame, or "-"
+-- edge:  'edge' when part of the hand is against the frame border
+-- vr:    'vr' or 'flat' — which action table the thumb is on
+mp.register_script_message('hand-preview', function(state, hold, pose, pts, edge, vr)
+    hand_view.state = state or 'off'
+    hand_view.hold = tonumber(hold) or 0
+    hand_view.pose = pose or ''
+    hand_view.edge = edge == 'edge'
+    hand_view.vr = vr == 'vr'
+
+    local p = nil
+    if pts and pts ~= '-' then
+        p = {}
+        for n in pts:gmatch('[^,]+') do p[#p + 1] = tonumber(n) end
+        if #p ~= 42 then p = nil end
+    end
+    hand_view.points = p
+    if p then hand_view.seen_at = mp.get_time() end
+
+    -- The panel has to disappear on its own once the hand leaves, and the
+    -- bridge stops sending the moment there is nothing to send. A slow timer
+    -- while gesture control is on is what closes it.
+    if hand_view.state == 'off' then
+        if hand_timer then hand_timer:kill(); hand_timer = nil end
+    elseif not hand_timer then
+        hand_timer = mp.add_periodic_timer(0.5, function() redraw_status() end)
+    end
+    redraw_status()
+end)
+
+-- A one-off warning from the bridge, named by STRINGS key.
+--
+-- Twelve seconds, which is long for a hint and deliberately so: the bridge only
+-- ever sends this once per session, and it is the one message someone who thinks
+-- the feature is broken has to actually catch. The timer above is what takes it
+-- back down.
+mp.register_script_message('hand-warning', function(key)
+    hand_view.warning = key
+    hand_view.warning_until = mp.get_time() + 12
+    if not hand_timer then
+        hand_timer = mp.add_periodic_timer(0.5, function() redraw_status() end)
+    end
     redraw_status()
 end)
 

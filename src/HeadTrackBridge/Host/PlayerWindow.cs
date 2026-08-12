@@ -481,8 +481,12 @@ public sealed class PlayerWindow : Form
     /// that uosc can see hover and clicks, and that means it, not the host,
     /// receives the wheel. A WndProc handler here looked right and never ran;
     /// what the user got was mpv's built-in wheel binding, volume.
+    ///
+    /// Taken from the controller that owns the field of view rather than written
+    /// out again: a thumb held up at the camera is now a fourth way to change
+    /// it, and three copies of a constant is where they start disagreeing.
     /// </summary>
-    private const double FovStepDegrees = 5;
+    private const double FovStepDegrees = PlayerModeController.FovStepDegrees;
 
     // -------------------------------------------------------- fullscreen ---
 
@@ -837,7 +841,7 @@ public sealed class PlayerWindow : Form
     /// <summary>
     /// Everything the camera drives. Its own top-level menu rather than a
     /// corner of the VR one because the camera is a distinct piece of hardware
-    /// with its own failure modes, and because gesture control will land here
+    /// with its own failure modes, and because gesture control lives here
     /// too — at which point "VR" would be covering three unrelated things.
     /// </summary>
     private ToolStripMenuItem CameraMenu()
@@ -848,6 +852,16 @@ public sealed class PlayerWindow : Form
                 MessageBox.Show(this, _t["cam.startFailedBody"], _t["vr.tracking"],
                                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
         });
+
+        // A setting, not a mode. Ticking this makes the camera watch for an open
+        // palm; gesture mode itself is entered by holding one up. The hint is
+        // what carries that, because a tick box cannot.
+        var gestures = Hint(Item("cam.gestures", () =>
+        {
+            if (!_session.SetGestureEnabled(!_session.GestureEnabled))
+                MessageBox.Show(this, _t["cam.startFailedBody"], _t["cam.gestures"],
+                                MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }), "cam.gestures.hint");
 
         // Sensitivity has to be adjustable while watching: how far the view
         // swings for a given head turn depends on the screen, how far away you
@@ -864,12 +878,58 @@ public sealed class PlayerWindow : Form
             Shortcut(Item("vr.recenter", () => _session.Mapper.RequestRecenter()), "Home"),
             "vr.recenter.hint");
 
+        var test = Hint(Item("cam.test", RunCameraTest), "cam.test.hint");
+
+        // Capture resolution.
+        //
+        // It matters most for the case that is hardest to serve: someone sitting
+        // well back from the camera. The landmarker crops from the full-size
+        // frame, so its precision — and the pose noise that follows from it —
+        // scales directly with how many pixels the face covers. A face 60 px
+        // wide at 720p is 180 px at 4K, and the crop goes from being upscaled to
+        // 256 to being downscaled to it.
+        //
+        // Not free, and not free in a way the numbers show: every frame is
+        // mirrored and downscaled for the detector, and both are per-pixel. The
+        // camera diagnostic prints the cycle time, which is where to look after
+        // changing this.
+        //
+        // Labelled with the pixels rather than "2K" alone, because the marketing
+        // names disagree with each other — 2K is 2560x1440 to one camera vendor
+        // and 2048-wide to a cinema camera — and the number is unambiguous.
+        var resolutions = new (string Key, int W, int H)[]
+        {
+            ("cam.res720", 1280, 720),
+            ("cam.res1080", 1920, 1080),
+            ("cam.res1440", 2560, 1440),
+            ("cam.res2160", 3840, 2160),
+        };
+        var resolutionItems = resolutions
+            .Select(r => Item(r.Key, () =>
+            {
+                if (!_session.SetCameraResolution(r.W, r.H))
+                    MessageBox.Show(this, _t["cam.startFailedBody"], _t["cam.resolution"],
+                                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }))
+            .ToArray();
+        var resolution = Hint(Menu("cam.resolution", resolutionItems.Cast<ToolStripItem>().ToArray()),
+                              "cam.resolution.hint");
+
         var menu = Menu("menu.camera",
-            Item("cam.test", RunCameraTest),
+            test,
             new ToolStripSeparator(),
             Shortcut(tracking, "Ctrl+Shift+H"),
             recentre,
-            sensitivity);
+            sensitivity,
+            resolution,
+            new ToolStripSeparator(),
+            Shortcut(gestures, "Ctrl+Shift+W"),
+            // Beside the switch rather than under Help, because the switch is
+            // useless without it: nothing happens until you know that an open
+            // palm is what starts it.
+            Item("cam.gestureHelp", () =>
+                MessageBox.Show(this, _t["gestures.body"], _t["gestures.title"],
+                                MessageBoxButtons.OK, MessageBoxIcon.None)));
 
         menu.DropDownOpening += (_, _) =>
         {
@@ -878,6 +938,12 @@ public sealed class PlayerWindow : Form
             // turning it on is what starts the camera.
             tracking.Enabled = true;
             tracking.Checked = _session.TrackingEnabled;
+            gestures.Checked = _session.GestureEnabled;
+
+            // Only while the diagnostic already has the camera. Greyed rather
+            // than silently doing nothing, since the window it would open is
+            // already on screen behind the player.
+            test.Enabled = !_cameraTestRunning;
 
             // Recentring is the opposite case: it acts on the next pose to
             // arrive, so with tracking off it silently does nothing at all.
@@ -887,6 +953,18 @@ public sealed class PlayerWindow : Form
             // The number is the point: "Less Sensitive" with nothing to compare
             // against gives no sense of how far you have moved or how far is left.
             sensitivity.Text = $"{_t["vr.sensitivity"]}  ({_session.YawGain:F0}°)";
+
+            // What it is running at, not what was asked for. With the camera
+            // closed those are the same thing; with it open they are only the
+            // same if the device had the mode, and the tick alone cannot say
+            // which. The header carries the truth and the tick carries the
+            // choice.
+            var (aw, ah) = _session.CameraSize;
+            resolution.Text = $"{_t["cam.resolution"]}  ({aw}x{ah})";
+            for (var i = 0; i < resolutionItems.Length; i++)
+                resolutionItems[i].Checked =
+                    _session.Config.Source.Camera.Width == resolutions[i].W &&
+                    _session.Config.Source.Camera.Height == resolutions[i].H;
         };
         return menu;
     }
@@ -903,26 +981,66 @@ public sealed class PlayerWindow : Form
     /// already tracking with it — say so rather than letting the child fail
     /// with a device error the user never sees.
     /// </summary>
-    private void RunCameraTest()
+    /// <summary>True while the diagnostic process holds the camera.</summary>
+    private bool _cameraTestRunning;
+
+    /// <summary>
+    /// Opens the diagnostic on whatever is switched on, and hands it the camera.
+    /// </summary>
+    /// <remarks>
+    /// One entry for both stages rather than one each. There is only ever one
+    /// question being asked here — "what does the camera actually see" — and the
+    /// answer differs by which stages are running, not by which menu item was
+    /// clicked. Two entries would also have to explain why the gesture one is
+    /// greyed out when gesture control is off, which is a sentence nobody should
+    /// have to read.
+    ///
+    /// The camera is lent out for the duration and taken back when the window
+    /// closes. Before that, this refused outright whenever the camera was in use
+    /// — which, once gesture control could open it, meant the diagnostic was
+    /// unreachable precisely when it was needed, with the only workaround being
+    /// to switch off the very thing you wanted to look at.
+    /// </remarks>
+    private async void RunCameraTest()
     {
-        if (_session.Camera is not null)
-        {
-            MessageBox.Show(this, _t["cam.busyBody"], _t["cam.test"],
-                            MessageBoxButtons.OK, MessageBoxIcon.Information);
-            return;
-        }
+        if (_cameraTestRunning) return;
 
         var exe = Environment.ProcessPath;
         if (exe is null) return;
 
+        // Claimed before the await, not after. Releasing the camera takes a few
+        // hundred milliseconds, and the menu is perfectly clickable throughout —
+        // without this, two clicks start two diagnostics and the second one
+        // finds the device already taken by the first.
+        _cameraTestRunning = true;
+
+        var (face, gesture) = await _session.SuspendCameraAsync();
+
         try
         {
             var info = new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = true };
-            info.ArgumentList.Add("--camera-preview");
-            System.Diagnostics.Process.Start(info);
+
+            // Show what the user has on. With neither on, the question is the
+            // original one — does this webcam work at all — and the face view is
+            // the answer to it.
+            if (gesture) info.ArgumentList.Add("--gesture-preview");
+            if (face || !gesture) info.ArgumentList.Add("--camera-preview");
+
+            var child = System.Diagnostics.Process.Start(info);
+            if (child is null) { _cameraTestRunning = false; _session.ResumeCamera(); return; }
+
+            child.EnableRaisingEvents = true;
+            child.Exited += (_, _) => RunOnUi(() =>
+            {
+                _cameraTestRunning = false;
+                _session.ResumeCamera();
+                child.Dispose();
+            });
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
+            _cameraTestRunning = false;
+            _session.ResumeCamera();
             MessageBox.Show(this, ex.Message, _t["cam.test"],
                             MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }

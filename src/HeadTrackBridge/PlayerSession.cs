@@ -5,6 +5,7 @@ using HeadTrackBridge.Input;
 using HeadTrackBridge.Mapping;
 using HeadTrackBridge.Mpv;
 using HeadTrackBridge.Tracking;
+using HeadTrackBridge.Tracking.Hand;
 
 namespace HeadTrackBridge;
 
@@ -23,10 +24,24 @@ public sealed class PlayerSession : IDisposable
     private readonly CommandLine _cli;
     private readonly string _configPath;
 
+    /// <summary>What drives head poses: a camera, opentrack over UDP, a replay, or nothing.</summary>
     private ITrackingSource? _source;
 
-    /// <summary>The tracking source, when it is a camera. Only the preview needs it.</summary>
-    public CameraFaceSource? Camera => _source as CameraFaceSource;
+    /// <summary>
+    /// The camera, when one is open. Usually the same object as
+    /// <see cref="_source"/>, and deliberately a separate field.
+    /// </summary>
+    /// <remarks>
+    /// The two came apart when gesture control arrived. Head poses may come from
+    /// opentrack while gestures still need a camera, so "the thing producing
+    /// poses" and "the thing holding the device" stopped being the same
+    /// question — and only one of them may open the camera, because a camera
+    /// opens once.
+    /// </remarks>
+    private CameraFaceSource? _camera;
+
+    /// <summary>The camera, for the preview and the gesture overlay to read.</summary>
+    public CameraFaceSource? Camera => _camera;
     private PoseRecorder? _recorder;
     private MpvLauncher? _launcher;
     private MouseDragWatcher? _dragWatcher;
@@ -67,18 +82,16 @@ public sealed class PlayerSession : IDisposable
     /// often closed by closing the window, and an exit-time save loses whatever
     /// was set in the session that mattered most — the last one.
     /// </summary>
-    public bool TrackingEnabled
-    {
-        get => _cfg.Ui.FaceTracking;
-        set
-        {
-            if (_cfg.Ui.FaceTracking == value) return;
-            _cfg.Ui.FaceTracking = value;
-            SaveConfig();
-            TrackingToggled?.Invoke(value);
-            _ = BroadcastTrackerStateAsync();
-        }
-    }
+    public bool TrackingEnabled => _cfg.Ui.FaceTracking;
+
+    /// <summary>Gesture control on/off, backed by the config for the same reason.</summary>
+    public bool GestureEnabled => _cfg.Ui.GestureControl;
+
+    /// <summary>
+    /// True while gesture mode is on — which is also while head tracking is
+    /// paused, because the two are the same state seen from either side.
+    /// </summary>
+    public bool GestureArmed => _camera?.GestureArmed == true;
 
     /// <summary>Raised when tracking is switched, for the on-screen indicator.</summary>
     public event Action<bool>? TrackingToggled;
@@ -86,7 +99,25 @@ public sealed class PlayerSession : IDisposable
     private CancellationToken _trackingCt = CancellationToken.None;
 
     /// <summary>
-    /// Turn head tracking on or off, starting the camera the first time.
+    /// Stages the preview modes want regardless of the saved settings, held
+    /// apart from the config so a diagnostic run cannot persist them.
+    /// </summary>
+    private bool _forceFace;
+    private bool _forceGesture;
+
+    /// <summary>
+    /// Set while the camera has been handed to another process.
+    /// </summary>
+    /// <remarks>
+    /// Separate from the two settings rather than switching them off, because
+    /// they must survive: lending the device to the diagnostic and taking it
+    /// back has to leave the user's configuration exactly as it was, including
+    /// if the player is closed while the diagnostic is still open.
+    /// </remarks>
+    private bool _suspended;
+
+    /// <summary>
+    /// Turn head tracking on or off, opening the camera the first time.
     ///
     /// Without the lazy start there was no way in: the menu entry was greyed
     /// unless a source was already running, and nothing started one unless
@@ -97,45 +128,196 @@ public sealed class PlayerSession : IDisposable
     /// Returns false when the camera could not be opened, so the caller can say
     /// so rather than leaving a tick box that quietly refuses to stay ticked.
     /// </summary>
-    public bool SetTrackingEnabled(bool on)
-    {
-        if (on && _source is null && !StartCameraOnDemand()) return false;
+    public bool SetTrackingEnabled(bool on) => SetStages(on, GestureEnabled);
 
-        // Switching off releases the camera, it does not merely stop reading it.
-        // Leaving the source alive kept the device open, so Test Camera stayed
-        // "busy" forever and a restart could not open it either — the config now
-        // said the source was a camera, so the player grabbed it again on
-        // startup. A camera opens once; whatever holds it has to let go.
-        if (!on && _source is CameraFaceSource camera)
+    /// <summary>Turn gesture control on or off. Same contract as above.</summary>
+    public bool SetGestureEnabled(bool on) => SetStages(TrackingEnabled, on);
+
+    /// <summary>
+    /// The one place either stage is switched, and the one place that decides
+    /// whether the camera should be open.
+    /// </summary>
+    /// <remarks>
+    /// One method for both because the answer depends on both. The logic used to
+    /// be spread across "turn tracking on" and "start the source at launch", and
+    /// with a second stage wanting the same device that shape has a hole in it
+    /// in each direction: switching head tracking off would close a camera
+    /// gesture control was still using, and switching gesture control on while
+    /// head tracking already held the device would try to open it twice.
+    /// </remarks>
+    private bool SetStages(bool face, bool gesture)
+    {
+        if (face == TrackingEnabled && gesture == GestureEnabled) return true;
+
+        // Only what is being newly switched on is checked. Re-checking a stage
+        // that is already running would fail a user who deleted a model file
+        // mid-session out of the *other* feature, which they did not touch.
+        try
         {
-            camera.Dispose();
-            _source = null;
-            Console.WriteLine("head tracking   : off, camera released");
+            CameraFaceSource.CheckModels(_cfg.Source.Camera,
+                                         face && !TrackingEnabled,
+                                         gesture && !GestureEnabled);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException)
+        {
+            Console.Error.WriteLine($"Could not start the camera: {ex.Message}");
+            CameraStartFailed?.Invoke(ex.Message);
+            return false;
         }
 
-        TrackingEnabled = on;
+        var (wasFace, wasGesture, wasKind) =
+            (_cfg.Ui.FaceTracking, _cfg.Ui.GestureControl, _cfg.Source.Kind);
+
+        _cfg.Ui.FaceTracking = face;
+        _cfg.Ui.GestureControl = gesture;
+
+        // Remembered, so the next launch brings the camera up without going
+        // through the menu again. Only from None: with opentrack or a replay
+        // configured, "turn head tracking on" means that source, not a webcam.
+        if (face && _cfg.Source.Kind == SourceKind.None) _cfg.Source.Kind = SourceKind.Camera;
+
+        if (!UpdateCamera())
+        {
+            (_cfg.Ui.FaceTracking, _cfg.Ui.GestureControl, _cfg.Source.Kind) =
+                (wasFace, wasGesture, wasKind);
+            return false;
+        }
+
+        SaveConfig();
+        if (face != wasFace) TrackingToggled?.Invoke(face);
+        _ = BroadcastTrackerStateAsync();
         return true;
     }
 
-    private bool StartCameraOnDemand()
+    /// <summary>The size the camera is actually running at, or the configured one before it opens.</summary>
+    public (int Width, int Height) CameraSize =>
+        _camera is { OpenedWidth: > 0 } c ? (c.OpenedWidth, c.OpenedHeight)
+                                          : (_cfg.Source.Camera.Width, _cfg.Source.Camera.Height);
+
+    /// <summary>
+    /// Change the capture resolution, reopening the device if it is running.
+    /// </summary>
+    /// <remarks>
+    /// A reopen, because a resolution is fixed when the device is opened — this
+    /// is the one camera setting that cannot be flipped on a running loop the way
+    /// the two stages can. It costs the best part of a second, which is why it is
+    /// a menu item and not something a slider does continuously.
+    ///
+    /// The size is saved whether or not the camera takes it. A webcam handed a
+    /// mode it does not have substitutes its nearest one silently, and if the
+    /// config were rewritten to match, the choice would appear to have been
+    /// ignored *and* forgotten — reconnecting a camera that does support it would
+    /// then still open small. What the device actually gave is reported instead,
+    /// by <see cref="CameraSize"/> and in the log.
+    /// </remarks>
+    public bool SetCameraResolution(int width, int height)
     {
+        var cam = _cfg.Source.Camera;
+        if (cam.Width == width && cam.Height == height) return true;
+
+        var (wasW, wasH) = (cam.Width, cam.Height);
+        cam.Width = width;
+        cam.Height = height;
+
+        if (_camera is { } running)
+        {
+            _ = Ipc?.SendAsync("script-message-to", "vrmenu", "hand-preview", "off", "0", "", "-");
+            running.Dispose();
+            if (ReferenceEquals(_source, running)) _source = null;
+            _camera = null;
+
+            if (!UpdateCamera())
+            {
+                (cam.Width, cam.Height) = (wasW, wasH);
+                UpdateCamera();
+                return false;
+            }
+        }
+
+        SaveConfig();
+        return true;
+    }
+
+    /// <summary>
+    /// Open, reconfigure or release the camera so that it matches what the two
+    /// stages currently want. False only when opening it failed.
+    /// </summary>
+    private bool UpdateCamera()
+    {
+        // Head tracking only drives the face stage when the camera is what
+        // produces poses. With opentrack configured, head tracking is on and the
+        // face stage is not — but gesture control may still want the device.
+        var wantFace = !_suspended && (TrackingEnabled || _forceFace)
+                       && _cfg.Source.Kind == SourceKind.Camera;
+        var wantGesture = !_suspended && (GestureEnabled || _forceGesture);
+
+        if (!wantFace && !wantGesture)
+        {
+            // Releasing, not merely ignoring. Leaving the source alive kept the
+            // device open, so Test Camera stayed "busy" forever and a restart
+            // could not open it either — the config now said the source was a
+            // camera, so the player grabbed it again on startup. A camera opens
+            // once; whatever holds it has to let go.
+            if (_camera is null) return true;
+            _ = Ipc?.SendAsync("script-message-to", "vrmenu", "hand-preview", "off", "0", "", "-");
+            _camera.Dispose();
+            if (ReferenceEquals(_source, _camera)) _source = null;
+            _camera = null;
+            Console.WriteLine("camera          : released — nothing is using it");
+            return true;
+        }
+
+        // Already open: flip the stages rather than reopening. Reopening a
+        // DirectShow device takes the best part of a second, and doing it to
+        // switch on gestures would blank head tracking while it happened.
+        if (_camera is { } running)
+        {
+            running.FaceEnabled = wantFace;
+            // The panel is fed by the stage, so switching the stage off has to take
+            // it down explicitly — nothing else will ever send again.
+            if (!wantGesture)
+                _ = Ipc?.SendAsync("script-message-to", "vrmenu", "hand-preview", "off", "0", "", "-");
+            running.GestureEnabled = wantGesture;
+            Console.WriteLine($"camera          : face stage {(wantFace ? "on" : "off")}, " +
+                              $"gesture stage {(wantGesture ? "on" : "off")}");
+            return true;
+        }
+
         try
         {
-            var camera = new CameraFaceSource(
-                _cfg.Source.Camera, AppPaths.Resolve(_cfg.Source.Camera.ModelPath), verbose: false);
+            var camera = new CameraFaceSource(_cfg.Source.Camera, wantFace, wantGesture, _cli.DumpUdp);
             camera.PoseReceived += p =>
             {
                 _recorder?.Write(p);
+                // The one place head tracking is switched on and off. Recording
+                // still happens either way, so a session can be captured while
+                // the view is being driven by hand.
                 if (TrackingEnabled) Mapper.Accept(p);
             };
-            camera.Start(_trackingCt);
-            _source = camera;
+            camera.GestureFired += OnGestureFired;
+            camera.GestureModeChanged += OnGestureModeChanged;
+            camera.GestureObserved += OnGestureObserved;
+            camera.GestureHandNeverFound += OnHandNeverFound;
 
-            // Remembered too, so the next launch brings it up without going
-            // through the menu again.
-            _cfg.Source.Kind = SourceKind.Camera;
-            SaveConfig();
-            Console.WriteLine($"head tracking   : started on demand — {camera.Name}");
+            // Said out loud when it differs, because it differs silently. A
+            // camera handed a mode it does not have substitutes its nearest one
+            // and reports success, so "I selected 4K" and "I am running at 4K"
+            // are separate facts and only one of them is on screen.
+            camera.Opened += (w, h) =>
+            {
+                var cam = _cfg.Source.Camera;
+                if (w == cam.Width && h == cam.Height) return;
+                _ = Ipc?.ShowTextAsync(
+                    UiStrings.Current.F("osd.cameraSizeDiffers", cam.Width, cam.Height, w, h), 4000);
+            };
+            camera.VrMode = Mode is { } m && m.Geometry != Geometry.Flat;
+            camera.Start(_trackingCt);
+
+            _camera = camera;
+            if (_cfg.Source.Kind == SourceKind.Camera) _source = camera;
+            Console.WriteLine($"camera          : {camera.Name}, " +
+                              $"face stage {(wantFace ? "on" : "off")}, " +
+                              $"gesture stage {(wantGesture ? "on" : "off")}");
             return true;
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException)
@@ -146,20 +328,330 @@ public sealed class PlayerSession : IDisposable
         }
     }
 
-    /// <summary>Raised when switching tracking on could not open the camera.</summary>
+    /// <summary>Raised when switching a stage on could not open the camera.</summary>
     public event Action<string>? CameraStartFailed;
+
+    /// <summary>
+    /// Let go of the camera so another process can open it, and report which
+    /// stages were running so the caller knows what to ask that process to show.
+    /// </summary>
+    /// <remarks>
+    /// A camera opens once, and the diagnostic is a separate process on purpose
+    /// — OpenCV's window pumps its own message loop, and a driver that hangs
+    /// should take the diagnostic down rather than the player. Those two facts
+    /// together used to make the diagnostic unreachable exactly when it was
+    /// wanted: switching gesture control on opened the camera, which made "Test
+    /// Camera" refuse with "the camera is busy", and switching gesture control
+    /// off to free it meant the diagnostic then had no gesture stage to show.
+    ///
+    /// Lending the device and taking it back afterwards is the way out, and it
+    /// has to be done without touching the settings — see <see cref="_suspended"/>.
+    /// </remarks>
+    public async Task<(bool Face, bool Gesture)> SuspendCameraAsync()
+    {
+        var was = (Face: TrackingEnabled && _cfg.Source.Kind == SourceKind.Camera,
+                   Gesture: GestureEnabled);
+        if (_suspended) return was;
+
+        _suspended = true;
+
+        var camera = _camera;
+        if (ReferenceEquals(_source, camera)) _source = null;
+        _camera = null;
+
+        if (camera is not null)
+        {
+            // Off the UI thread. Disposing joins the camera thread, and that
+            // thread may be anywhere: blocked inside a frame read, or asleep for
+            // up to 400 ms in the duty-cycle budget. Doing it inline freezes the
+            // window for as long as that takes.
+            await Task.Run(camera.Dispose);
+
+            // A short guard on top, and a small one because it was measured
+            // rather than guessed. Closing a DirectShow handle and reopening the
+            // same device on this machine works with no wait at all — three runs
+            // at 0, 100 and 400 ms all succeeded, and the reopen itself costs
+            // about 310 ms whatever the gap. So the settle is not what makes
+            // this work; releasing the thread promptly is (see
+            // CameraFaceSource.Idle).
+            //
+            // Kept at 150 anyway: this machine is not the user's, the cost is
+            // invisible next to the 310 ms the open takes regardless, and losing
+            // the race shows "could not open device 0" — which is also what a
+            // genuinely broken webcam says.
+            await Task.Delay(150);
+        }
+
+        Console.WriteLine("camera          : released for the diagnostic");
+        return was;
+    }
+
+    /// <summary>Take the camera back, restoring whatever was running before.</summary>
+    public void ResumeCamera()
+    {
+        if (!_suspended) return;
+        _suspended = false;
+        UpdateCamera();
+        _ = BroadcastTrackerStateAsync();
+    }
+
+    /// <summary>
+    /// A gesture was recognised and resolved to an action. Raised whether or not
+    /// there is a player to send it to, which is what makes it useful to the
+    /// preview.
+    /// </summary>
+    public event Action<GestureAction>? GestureRecognised;
+
+    // ------------------------------------------------------------ gestures ---
+
+    /// <summary>
+    /// Gesture mode has been entered or left, on the camera thread.
+    ///
+    /// Announced rather than left to be noticed. Entering it stops head tracking
+    /// driving the view, and a picture that quietly stops following your head is
+    /// indistinguishable from one that has broken.
+    /// </summary>
+    private void OnGestureModeChanged(bool on)
+    {
+        // Only mention head tracking when there is head tracking to mention.
+        //
+        // The message was unconditional at first, so switching gesture control
+        // on by itself announced that head tracking had been paused — to someone
+        // who had never turned it on, and whose face indicator was dark. It
+        // named a feature they were not using as the thing that had just
+        // changed, which is worse than saying nothing.
+        var pausesTracking = _camera is { FaceEnabled: true };
+
+        Console.WriteLine("\n  [gesture] mode " +
+                          (on ? pausesTracking ? "on — head tracking paused" : "on" : "off"));
+        _ = Ipc?.ShowTextAsync(
+            UiStrings.Current[on ? pausesTracking ? "osd.gestureOn" : "osd.gestureOnAlone"
+                                 : "osd.gestureOff"],
+            on ? 2000 : 1200);
+        _ = BroadcastTrackerStateAsync();
+    }
+
+    /// <summary>
+    /// A recognised gesture, on the camera thread.
+    /// </summary>
+    /// <remarks>
+    /// Every action toasts what it did. Without that, "the gesture was not
+    /// recognised" and "it was recognised and does something else than you
+    /// expected" look identical from the sofa, and they need opposite fixes.
+    ///
+    /// The steps match the menu entries they stand in for — 5 units of volume, 5
+    /// degrees of view — so that reaching for a gesture and reaching for the menu
+    /// do the same thing. Seeking is the exception, and
+    /// <see cref="SeekForwardSeconds"/> says why.
+    /// </remarks>
+    private void OnGestureFired(Gesture gesture) => _ = ApplyGestureAsync(gesture);
+
+    /// <summary>
+    /// Seconds a seek gesture moves.
+    /// </summary>
+    /// <remarks>
+    /// Ten each way, which is where the gesture stops matching the menu entry it
+    /// stands in for — that one still jumps 30 s forward, and so does the control
+    /// bar button and the arrow key.
+    ///
+    /// They are not the same act. A menu entry is chosen once; a gesture is held,
+    /// and repeats while it is. Forward at 30 s a step covered 75 seconds of film
+    /// for every second the finger was out, which is past the point where the
+    /// picture can be read at all — so the step has to fall as the gesture starts
+    /// repeating, or the two multiply. With
+    /// <see cref="GestureConfig.SeekRepeatSeconds"/> at 0.8 the gesture now moves
+    /// 12.5 seconds of film a second, and the two directions are symmetric, which
+    /// they have to be for a hand: nothing about holding a finger out to the right
+    /// says "three times further than to the left".
+    /// </remarks>
+    private const int SeekBackSeconds = 10;
+    private const int SeekForwardSeconds = 10;
+
+    /// <summary>Volume units a thumb gesture moves, matching the Audio menu.</summary>
+    private const int VolumeStep = 5;
+
+    private async Task ApplyGestureAsync(Gesture gesture)
+    {
+        var vr = Mode is { } mode && mode.Geometry != Geometry.Flat;
+        var action = GestureMap.Resolve(gesture, vr);
+        if (action == GestureAction.None) return;
+
+        // Logged before anything is dispatched, and before the check for mpv.
+        //
+        // Both orderings were wrong in the first version. The IPC check came
+        // first, so under --gesture-preview — where there is no mpv at all, and
+        // which exists precisely to find out whether gestures are recognised —
+        // a gesture fired and printed nothing. A session's whole log could show
+        // gesture mode being entered and left repeatedly with no way to tell
+        // whether a single gesture had ever been read.
+        Console.WriteLine($"\n  [gesture] {gesture.Pose} {gesture.Direction}" +
+                          $"{(gesture.Swipe ? " swipe" : "")} -> {action}" +
+                          (Ipc is null ? "  (no player attached; nothing was sent)" : ""));
+
+        GestureRecognised?.Invoke(action);
+        if (Ipc is not { } ipc) return;
+
+        try
+        {
+            // Null means the action announced itself, which the field of view does
+            // because the wheel and the keys need the same message and never
+            // pass through here.
+            if (await PerformAsync(ipc, action) is { } said) await ipc.ShowTextAsync(said, 1400);
+        }
+        catch (Exception e) when (e is IOException or ObjectDisposedException)
+        {
+            // mpv went away between the gesture and the command. Nothing to say.
+        }
+    }
+
+    /// <summary>
+    /// Carry out an action and describe what it did, with the number in it.
+    /// </summary>
+    /// <remarks>
+    /// The value, not just the verb. "Volume up" leaves you no idea whether you
+    /// are at 20 or at 100, and after three repeats of a gesture that is the
+    /// only thing you want to know; "back 10 s" does not say where you landed,
+    /// which is the entire reason for seeking. This is the same argument the
+    /// tracking-sensitivity menu already makes for showing its own number —
+    /// "Less Sensitive" with nothing to compare against gives no sense of how
+    /// far you have moved or how far is left — and gestures shipped without it.
+    ///
+    /// Read back from mpv rather than predicted. Volume clamps at 100 and
+    /// seeking clamps at both ends of the file, so the number we would have
+    /// computed is wrong exactly when the user most needs to know it: at the
+    /// limit, where nothing appears to be happening any more.
+    /// </remarks>
+    private async Task<string?> PerformAsync(MpvIpcClient ipc, GestureAction action)
+    {
+        var t = UiStrings.Current;
+
+        switch (action)
+        {
+            case GestureAction.PlayPause:
+                await ipc.SendAsync("cycle", "pause");
+                return t[await ipc.GetBoolPropertyAsync("pause") == true
+                    ? "gesture.paused" : "gesture.playing"];
+
+            case GestureAction.SeekBack:
+            case GestureAction.SeekForward:
+            {
+                var back = action == GestureAction.SeekBack;
+                await ipc.SendAsync("seek", back ? -SeekBackSeconds : SeekForwardSeconds);
+                var at = await ipc.GetDoublePropertyAsync("time-pos") ?? 0;
+                var total = await ipc.GetDoublePropertyAsync("duration") ?? 0;
+                return t.F(back ? "gesture.seekBack" : "gesture.seekForward",
+                           back ? SeekBackSeconds : SeekForwardSeconds,
+                           Timecode(at), Timecode(total));
+            }
+
+            case GestureAction.VolumeUp:
+            case GestureAction.VolumeDown:
+                await ipc.SendAsync("add", "volume",
+                                    action == GestureAction.VolumeUp ? VolumeStep : -VolumeStep);
+                return t.F("gesture.volumeAt",
+                           (await ipc.GetDoublePropertyAsync("volume") ?? 0).ToString("F0", CultureInfo.CurrentCulture));
+
+            case GestureAction.FovNarrower:
+            case GestureAction.FovWider:
+            {
+                if (Mode is not { } mode) return t[GestureMap.Key(action)];
+                var step = action == GestureAction.FovNarrower
+                    ? -PlayerModeController.FovStepDegrees : PlayerModeController.FovStepDegrees;
+                await mode.AdjustFovAsync(step);
+                // Null, because the controller announces the new angle itself —
+                // it has to, for the wheel and the keys, which do not come
+                // through here at all.
+                return null;
+            }
+
+            case GestureAction.PreviousFile:
+            case GestureAction.NextFile:
+                // No number worth showing, and no point reading the title back:
+                // the next file has not loaded yet when this returns, so it
+                // would name the one being left.
+                await ipc.SendAsync(action == GestureAction.PreviousFile
+                    ? "playlist-prev" : "playlist-next", "weak");
+                return t[GestureMap.Key(action)];
+
+            default:
+                return t[GestureMap.Key(action)];
+        }
+    }
+
+    /// <summary>
+    /// Seconds as h:mm:ss, dropping the hours for anything under one.
+    /// </summary>
+    private static string Timecode(double seconds)
+    {
+        var span = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return span.TotalHours >= 1
+            ? $"{(int)span.TotalHours}:{span.Minutes:00}:{span.Seconds:00}"
+            : $"{span.Minutes}:{span.Seconds:00}";
+    }
+
+    /// <summary>
+    /// Feed the on-screen hand panel: what the camera can see, right now.
+    /// </summary>
+    /// <remarks>
+    /// The reason this exists at all is that gestures, unlike head tracking,
+    /// have no feedback until something fires. Turn your head and the picture
+    /// moves; hold up a hand and, until a gesture completes, nothing on screen
+    /// changes whether the camera is seeing a perfect hand or is pointed at the
+    /// ceiling. The three failures — pose not recognised, hand out of frame,
+    /// camera never opened — are indistinguishable, and the instinctive
+    /// response to all three is to gesture harder.
+    /// </remarks>
+    private void OnGestureObserved(HandView view)
+    {
+        _ = Ipc?.SendAsync("script-message-to", "vrmenu", "hand-preview",
+                           view.Armed ? "armed" : "looking",
+                           view.Hold.ToString("F2", CultureInfo.InvariantCulture),
+                           PoseKey(view.Pose),
+                           view.Points,
+                           view.Edge ? "edge" : "",
+                           Mode is { } mode && mode.Geometry != Geometry.Flat ? "vr" : "flat");
+    }
+
+    /// <summary>
+    /// Gesture control has been on a while and the camera has never found a hand.
+    /// </summary>
+    /// <remarks>
+    /// Said out loud rather than left to be inferred. Everything else about this
+    /// feature reports a hand it can see; nothing reports the case where it has
+    /// never seen one, which is the case where the user is most certain the
+    /// software is at fault. The two things that actually cause it — a camera
+    /// aimed above where hands are held, and a room too dark for the detector —
+    /// are both fixed in seconds by someone who knows to look.
+    /// </remarks>
+    private void OnHandNeverFound()
+    {
+        Console.WriteLine("\n  [gesture] no hand found since gesture control was switched on — " +
+                          "check the camera angle and the light");
+        _ = Ipc?.SendAsync("script-message-to", "vrmenu", "hand-warning", "no camera hand");
+    }
+
+    /// <summary>The label the OSD script knows this pose by. Empty when there is none.</summary>
+    private static string PoseKey(Pose pose) => pose switch
+    {
+        Pose.OpenPalm => "open palm",
+        Pose.Fist => "fist",
+        Pose.Point => "point",
+        Pose.Thumb => "thumb",
+        _ => "",
+    };
 
     /// <summary>
     /// Tell the OSD script which indicators to light.
     ///
-    /// "na" for the hand rather than "off": gesture control does not exist yet,
-    /// and an icon that looks merely switched off invites people to hunt for
-    /// the switch. The script draws that state dimmer than off.
+    /// Three states for the face rather than two, because "you switched it off"
+    /// and "it is standing aside while you gesture" are different things and the
+    /// second one ends by itself. An icon that simply went dark during every
+    /// gesture would read as the feature failing.
     /// </summary>
     public Task BroadcastTrackerStateAsync() =>
         Ipc?.SendAsync("script-message-to", "vrmenu", "tracker-state",
-                       TrackingEnabled ? "on" : "off",
-                       "na")
+                       !TrackingEnabled ? "off" : GestureArmed ? "paused" : "on",
+                       !GestureEnabled ? "off" : GestureArmed ? "on" : "idle")
         ?? Task.CompletedTask;
 
     /// <summary>True once mpv is up and the mode controller exists.</summary>
@@ -204,20 +696,14 @@ public sealed class PlayerSession : IDisposable
         _trackingCt = ct;
         try
         {
+            // The camera is deliberately absent from this switch. Two stages now
+            // want it and only one of them is a pose source, so the decision to
+            // open it belongs to UpdateCamera below, which can see both.
             _source = _cfg.Source.Kind switch
             {
-                SourceKind.None => null,
+                SourceKind.None or SourceKind.Camera => null,
                 SourceKind.Udp => new OpenTrackUdpSource(_cfg.Source.UdpPort, _cli.DumpUdp),
                 SourceKind.Replay => new ReplaySource(AppPaths.Resolve(_cfg.Source.ReplayFile)),
-                // Only when tracking is actually on. The kind is remembered so
-                // the choice survives a restart, but remembering it must not
-                // mean seizing the camera at launch for someone who has turned
-                // tracking off — that is what made Test Camera unusable until
-                // the whole install was replaced.
-                SourceKind.Camera when _cfg.Ui.FaceTracking || _cli.DumpUdp || _cli.CameraPreview =>
-                    new CameraFaceSource(
-                        _cfg.Source.Camera, AppPaths.Resolve(_cfg.Source.Camera.ModelPath), _cli.DumpUdp),
-                SourceKind.Camera => null,
                 _ => new SyntheticSource(_cfg.Source.SyntheticMode, 60, _cfg.Source.SyntheticJitterDegrees),
             };
         }
@@ -250,7 +736,36 @@ public sealed class PlayerSession : IDisposable
             _source.Start(ct);
         }
 
-        Console.WriteLine($"head tracking   : {_source?.Name ?? "off (mouse drag only) — enable with --source=camera"}");
+        // The remembered kind must not mean seizing the camera at launch for
+        // someone who has turned both stages off — that is what made Test
+        // Camera unusable until the whole install was replaced. The two preview
+        // modes are the exception, since there is nothing else for them to show.
+        //
+        // Held as overrides rather than written into the config. Setting
+        // _cfg.Ui.GestureControl here would be one SaveConfig away from a
+        // diagnostic run leaving the feature switched on for good — the same
+        // shape as the bug that shipped a development machine's window size.
+        _forceFace = _cli.CameraPreview;
+        _forceGesture = _cli.GesturePreview;
+        UpdateCamera();
+
+        // Read back off the camera rather than off the settings.
+        //
+        // The first version printed the config, and under --gesture-preview it
+        // contradicted the line above it in two directions at once: "head
+        // tracking: camera 0" beside "face stage off", and "gesture control:
+        // off" beside "gesture stage on". Both were true statements about the
+        // saved settings and both were false about what was running, because
+        // the preview modes override the settings without writing them.
+        //
+        // AGENTS.md rule 2, applied to a diagnostic: report what is happening,
+        // not what was asked for.
+        Console.WriteLine("head tracking   : " +
+            (_camera is { FaceEnabled: true } ? _camera.Name
+             : _source is { } s ? s.Name
+             : "off (mouse drag only) — enable with --source=camera"));
+        Console.WriteLine("gesture control : " +
+            (_camera is { GestureEnabled: true } ? "on — hold an open palm to the camera" : "off"));
         if (_recorder is not null) Console.WriteLine($"recording to    : {_recorder.Path_}");
         return true;
     }
@@ -309,6 +824,11 @@ public sealed class PlayerSession : IDisposable
 
             // Geometry and FOV both move the edge of the picture.
             UpdateViewLimits();
+
+            // Which gesture table applies. A flat file has no field of view to
+            // adjust, so the thumb means volume there and the view here — and
+            // the file can change under a running camera.
+            if (_camera is not null) _camera.VrMode = mode.Geometry != Geometry.Flat;
 
             // Only the user's own corrections are remembered — see ModeOrigin.
             // Subscribed here rather than after the first layout pass, so the
@@ -557,6 +1077,20 @@ public sealed class PlayerSession : IDisposable
                     !ok ? UiStrings.Current["cam.startFailedBody"]
                         : UiStrings.Current[want ? "osd.trackingOn" : "osd.trackingOff"],
                     ok ? 1200 : 3000);
+                break;
+            }
+            // Switches the feature on, which is not the same as entering gesture
+            // mode: that takes an open palm held at the camera. Two steps on
+            // purpose — the switch is a setting that persists, and gesture mode
+            // is a thing you are doing right now.
+            case "toggle-gestures":
+            {
+                var want = !GestureEnabled;
+                var ok = SetGestureEnabled(want);
+                _ = ipc.ShowTextAsync(
+                    !ok ? UiStrings.Current["cam.startFailedBody"]
+                        : UiStrings.Current[want ? "osd.gestureEnabled" : "osd.gestureDisabled"],
+                    ok ? 2500 : 3000);
                 break;
             }
             // ---- player mode, driven by the OSD menu -----------------------
@@ -924,7 +1458,12 @@ public sealed class PlayerSession : IDisposable
             // that really leaves says it once.
             const double announceAfterSeconds = 2.0;
 
-            var tracking = _source is not null && TrackingEnabled;
+            // Gesture mode counts as "not tracking" here, and that is the whole
+            // point of naming it: while it is on, no pose is meant to arrive,
+            // so every one of the states below would otherwise conclude the
+            // tracker had died and say so over the video. It is a deliberate
+            // pause, and OnGestureModeChanged has already announced it.
+            var tracking = _source is not null && TrackingEnabled && !GestureArmed;
             if (!tracking)
             {
                 // Switching tracking off is not signal loss, and must not toast.
@@ -963,10 +1502,11 @@ public sealed class PlayerSession : IDisposable
                 lastStatus = now;
                 var rel = Mapper.CurrentRelative;
                 var v = Mapper.Current;
-                var state = _source is null ? "  drag"
-                          : !TrackingEnabled ? "PAUSED"
-                          : Mapper.HasSignal ? "  live"
-                          : "  LOST";
+                var state = GestureArmed ? "GESTURE"
+                          : _source is null ? "   drag"
+                          : !TrackingEnabled ? " PAUSED"
+                          : Mapper.HasSignal ? "   live"
+                          : "   LOST";
                 Console.Write(string.Create(CultureInfo.InvariantCulture,
                     $"\r[{state}] head y{rel.YawDegrees,6:F1} p{rel.PitchDegrees,6:F1}  ->  view y{v.YawDegrees,7:F1} p{v.PitchDegrees,6:F1}  writes {_driver.WriteCount,8}   "));
             }
@@ -1164,9 +1704,9 @@ public sealed class PlayerSession : IDisposable
         Console.WriteLine();
         Console.WriteLine("keys (in player window)   keys (in this console)");
         Console.WriteLine("  Tab     mode panel        r  recentre      t  tracking on/off");
-        Console.WriteLine("  Ctrl+e  toggle 360        v  reset view    q  quit");
+        Console.WriteLine("  Ctrl+e  toggle 360        v  reset view    g  gestures on/off");
         Console.WriteLine("  Ctrl+t  mpv360 help       [ ]  gain down/up   f  filter on/off");
-        Console.WriteLine("                            s  save current tuning to config");
+        Console.WriteLine("                            s  save tuning    q  quit");
         Console.WriteLine();
     }
 
@@ -1192,6 +1732,11 @@ public sealed class PlayerSession : IDisposable
                         Report(SetTrackingEnabled(!TrackingEnabled)
                             ? $"tracking {(TrackingEnabled ? "on" : "off")}"
                             : "tracking: the camera would not open");
+                        break;
+                    case 'g':
+                        Report(SetGestureEnabled(!GestureEnabled)
+                            ? $"gesture control {(GestureEnabled ? "on — hold an open palm to the camera" : "off")}"
+                            : "gestures: the camera would not open");
                         break;
                     case 'f':
                         _cfg.Filter.Enabled = !_cfg.Filter.Enabled;
@@ -1220,6 +1765,9 @@ public sealed class PlayerSession : IDisposable
         Ipc?.Dispose();
         _launcher?.Dispose();
         _recorder?.Dispose();
-        _source?.Dispose();
+        // Usually the same object, so the reference check is what stops the
+        // camera thread being joined twice.
+        if (!ReferenceEquals(_source, _camera)) _source?.Dispose();
+        _camera?.Dispose();
     }
 }

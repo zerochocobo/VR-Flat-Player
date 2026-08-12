@@ -98,6 +98,30 @@ and failed, the hidden coupling that makes an obvious simplification wrong.
 Most non-obvious constants in this codebase have a number and a reason attached;
 keep it that way when changing them.
 
+## 6. Do not rewrite source files through a shell one-liner
+
+Twice now a script that edited a file in place has destroyed it, and both times
+the damage was silent at the moment it happened.
+
+- `open(f,'w').write(open(f).read().replace(...))` — Python opens for writing
+  first, which truncates, so the read returns nothing and the file becomes 0
+  bytes. This hit `HeadTrackBridge.csproj`. `publish.ps1`'s version check caught
+  it, by luck: that check exists to stop the README versions drifting.
+- `Get-Content -Raw | ... | Set-Content -Encoding utf8` in Windows PowerShell
+  5.1 — `Get-Content` decodes with the system ANSI codepage, which on a Chinese
+  install is GBK, so every non-ASCII character in a UTF-8 source is mangled on
+  the way in and written back wrong. This hit a `.cs` file: 20 em-dashes and a
+  Chinese comment, unrecoverable by rereading because the third byte of each
+  character was replaced by `?` before it was ever written.
+
+The second one is the worse trap, because **a new file is not in git yet**, so
+`git checkout --` cannot undo it.
+
+Use the Edit tool for source files. When a script really is the right tool, read
+and write with explicit UTF-8 (`io.open(p, encoding='utf-8')`, and a separate
+write after the read completes), and check the result — `grep` for a character
+you know should be there.
+
 ## Build, test, publish
 
 ```

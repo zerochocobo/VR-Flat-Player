@@ -9,6 +9,7 @@ public sealed class CommandLine
     public bool WriteDefaultConfig { get; private set; }
     public bool DumpUdp { get; private set; }
     public bool CameraPreview { get; private set; }
+    public bool GesturePreview { get; private set; }
     public string? ConfigPath { get; private set; }
     public string? MediaPath { get; private set; }
 
@@ -41,6 +42,11 @@ public sealed class CommandLine
                 // and asking for the preview and then being told to also pass
                 // --source would be a pointless extra step.
                 case "--camera-preview": c.CameraPreview = true; c._kind = SourceKind.Camera; break;
+                // The same window, watching the other stage. It deliberately
+                // does not imply the camera *source*: gesture control does not
+                // need one, and setting it would turn head tracking on for
+                // someone who only wanted to check their hand.
+                case "--gesture-preview": c.GesturePreview = true; break;
                 case "--camera": c._cameraIndex = int.Parse(value!, CultureInfo.InvariantCulture);
                                  c._kind = SourceKind.Camera; break;
                 case "--config": c.ConfigPath = value; break;
@@ -123,6 +129,11 @@ public sealed class CommandLine
                                           "camera will not open" from "no face
                                           found" from "pose is wrong", which the
                                           numbers alone cannot. Esc to close.
+          --gesture-preview               the same window for hand gestures: the
+                                          21 landmarks, the pose that was read,
+                                          and which fingers it counted as out.
+                                          When a gesture will not register, that
+                                          last one is what says why. Esc to close.
           --port=4242                     UDP port for opentrack output
           --synthetic=mouse|sweep|still   fake source, for a machine with no webcam
           --replay=recordings/a.csv       replay a recorded session (implies --source=replay)
@@ -163,6 +174,8 @@ public sealed class CommandLine
             VRFlatPlayer "E:\\vr\\clip8k.mp4"
           check the webcam tracker before trusting it:
             VRFlatPlayer --camera-preview
+          check hand gesture recognition:
+            VRFlatPlayer --gesture-preview
           watch with webcam head tracking:
             VRFlatPlayer --source=camera "E:\\vr\\clip8k.mp4"
           laptop, verify opentrack first:

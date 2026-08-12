@@ -152,11 +152,14 @@ internal static class Program
 
         // Diagnostics, both of which run without mpv. The preview has to own
         // this thread: OpenCV's HighGui pumps its own message loop.
-        if (cli.CameraPreview)
+        // One window for both stages. Which of them it annotates follows which
+        // are running, so --gesture-preview on a machine that also has head
+        // tracking configured shows both rather than making the user choose.
+        if (cli.CameraPreview || cli.GesturePreview)
         {
             if (session.Camera is not { } camera)
             {
-                Console.Error.WriteLine("Camera preview needs the camera source. Try --camera-preview on its own.");
+                Console.Error.WriteLine("The preview needs a camera. Try --camera-preview on its own.");
                 return 1;
             }
             HeadTrackBridge.Tracking.CameraPreview.Run(camera, cfg.Source.Camera.Mirror, cts.Token);

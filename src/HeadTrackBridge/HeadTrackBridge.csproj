@@ -12,11 +12,11 @@
     <!-- Windows needs a four-part FileVersion, but the version people should
          see is the short one, so both are set rather than derived. Change them
          together. -->
-    <Version>0.3</Version>
-    <InformationalVersion>0.3</InformationalVersion>
+    <Version>0.4</Version>
+    <InformationalVersion>0.4</InformationalVersion>
     <Product>VR Flat Player</Product>
     <AssemblyTitle>VR Flat Player</AssemblyTitle>
-    <Description>Watch 180/360 VR video on a flat PC monitor, with optional webcam head tracking.</Description>
+    <Description>Watch 180/360 VR video on a flat PC monitor, with optional webcam head tracking and hand gestures.</Description>
     <Copyright>GPL-3.0-or-later</Copyright>
     <!-- Only Program.cs enters the message loop; the rest is plain console
          code, so opting out of the implicit Form1 scaffolding. -->
